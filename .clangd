@@ -1,0 +1,13 @@
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
+
+Diagnostics:
+  UnusedIncludes: Strict
+
+Documentation:
+  CommentFormat: Doxygen
+
+CompileFlags:
+  CompilationDatabase: build
