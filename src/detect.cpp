@@ -66,8 +66,7 @@ bool check_vst2_ep(ea_t ea) {
 	}
 
 	if (!found) {
-		if (had_type)
-			apply_tinfo(pfn->start_ea, old_tif, TINFO_GUESSED);
+		if (had_type) apply_tinfo(pfn->start_ea, old_tif, TINFO_GUESSED);
 		else
 			del_tinfo(pfn->start_ea);
 		mark_cfunc_dirty(pfn->start_ea);
@@ -76,21 +75,23 @@ bool check_vst2_ep(ea_t ea) {
 	return found;
 }
 
+static const char* lstrip(const char* s) { return (s[0] == '_') ? s + 1 : s; }
+
 rv::Interface classify_from_exports(const std::vector<qstring>& exports) {
 
 	for (const qstring& ex : exports) {
-		switch (str_cth(ex.c_str())) {
+		switch (str_cth(lstrip(ex.c_str()))) {
 
 		case str_cth("VSTPluginMain"):
-		case str_cth("_VSTPluginMain"):
 			return rv::VST2;
 		case str_cth("GetPluginFactory"):
-		case str_cth("_GetPluginFactory"):
 			return rv::VST3;
 		case str_cth("ACFRegisterComponent"):
 			return rv::AAX;
 		case str_cth("clap_entry"):
 			return rv::CLAP;
+		case str_cth("AUPluginInstanceEntry"):
+			return rv::AU;
 		}
 	}
 
