@@ -10,7 +10,7 @@ import fnmatch
 
 TAG = "[REverb]"
 
-BINARY_EXTS = {".vst3", ".dll", ".so", ".aaxplugin", ".clap", ".vst", ".dylib"}
+BINARY_EXTS = {".vst3", ".dll", ".so", ".aaxplugin", ".clap", ".vst", ".dylib", ".x64", ".arm64"}
 BUNDLE_EXTS = {".vst", ".vst3", ".component", ".aaxplugin", ".clap"}
 
 EXCLUDE_PATTERNS = [
