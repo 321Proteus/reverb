@@ -15,7 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Single source of truth for supported IDA versions: ida-plugin.json
   versions:
     name: Read IDA versions
     runs-on: ubuntu-latest
@@ -37,7 +36,6 @@ jobs:
         os:
           - { runner: ubuntu-latest,  name: linux }
           - { runner: windows-latest, name: windows }
-          # IDA loads plugins matching its own arch, so build both mac slices
           - { runner: macos-latest,   name: macos-arm64 }
           - { runner: macos-15-intel, name: macos-x64 }
 
@@ -57,13 +55,13 @@ jobs:
           uvx --from ida-hcli hcli --disable-updates \
             download "release/${v}/sdk-and-utilities/idasdk${v//./}.zip"
           unzip -q idasdk*.zip -d ./ida-temp/
-          # SDK folder layout differs between releases: locate the root via
-          # include/pro.h instead of hard-coding a subdirectory.
           pro_h="$(find ida-temp -path '*/include/pro.h' | head -n1)"
           test -n "$pro_h" || { echo "pro.h not found in SDK"; exit 1; }
           mv "$(dirname "$(dirname "$pro_h")")" ./ida-sdk
-          test -f ida-sdk/cmake/idasdk_init.cmake \
-            || { echo "SDK ${v} has no cmake/idasdk_init.cmake"; exit 1; }
+          if [ ! -f ida-sdk/cmake/idasdk_init.cmake ]; then
+            git clone --depth 1 \
+              https://github.com/allthingsida/ida-cmake.git ./ida-sdk/ida-cmake
+          fi
 
       - name: Setup CMake
         uses: jwlawson/actions-setup-cmake@v2
@@ -94,9 +92,8 @@ jobs:
             f="ida-sdk/bin/plugins/reverb.${ext}"
             if [ -f "$f" ]; then cp -v "$f" artifacts/; fi
           done
-          ls artifacts/reverb.* > /dev/null   # fail if no binary was produced
+          ls artifacts/reverb.* > /dev/null
           cp -r assets artifacts/
-          # Pin the metadata to the IDA version this binary was built against
           jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
 
       - name: Upload artifacts
@@ -109,7 +106,6 @@ jobs:
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [versions, build]
-    # macOS runner for lipo: merges the two mac slices into one universal dylib
     runs-on: macos-latest
     permissions:
       contents: write
@@ -131,7 +127,7 @@ jobs:
           v="${{ matrix.ida }}"
           p="parts/reverb-ida${v}"
           mkdir -p pkg
-          cp -R "${p}-linux/." pkg/        # reverb.so + ida-plugin.json + assets/
+          cp -R "${p}-linux/." pkg/
           cp "${p}-windows/reverb.dll" pkg/
           lipo -create \
             "${p}-macos-arm64/reverb.dylib" \
