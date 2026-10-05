@@ -34,12 +34,12 @@ static int vtable_run_length(ea_t start_ea, int max_entries = 64) {
 static bool looks_like_vtable(ea_t ea) { return vtable_run_length(ea) >= 2; }
 
 struct vtable_store_finder_t : public ctree_visitor_t {
-	typedef struct {
+	struct hit_t {
 		sval_t this_offset;
 		ea_t vtable_ea;
 		int var_idx;
 		ea_t ctor_ea = BADADDR;
-	} hit_t;
+	};
 
 	std::vector<hit_t> hits;
 	vtable_store_finder_t() : ctree_visitor_t(CV_FAST) {}

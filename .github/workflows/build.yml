@@ -88,11 +88,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          for ext in so dll dylib; do
-            f="ida-sdk/bin/plugins/reverb.${ext}"
-            if [ -f "$f" ]; then cp -v "$f" artifacts/; fi
-          done
-          ls artifacts/reverb.* > /dev/null
+          find ida-sdk/bin build -type f -name '*reverb*' || true
+          find ida-sdk/bin build -type f \
+            \( -name '*reverb.so' -o -name '*reverb.dll' -o -name '*reverb.dylib' \) \
+            -exec cp -v {} artifacts/ \; || true
+          ls artifacts | grep -E 'reverb\.(so|dll|dylib)$' > /dev/null \
+            || { echo "No plugin binary found"; exit 1; }
           cp -r assets artifacts/
           jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
 

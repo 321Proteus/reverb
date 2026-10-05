@@ -14,6 +14,29 @@
 #include <set>
 #include <ua.hpp>
 
+#if IDA_SDK_VERSION >= 940
+
+typedef function_item_iterator_t rv_fii_t;
+
+static ea_t rv_func_start(int i) { return get_func_ea_by_num(i); }
+static bool rv_fii_set(rv_fii_t& it, ea_t ea) { return it.set(ea); }
+
+#else
+
+typedef func_item_iterator_t rv_fii_t;
+
+static ea_t rv_func_start(int i) {
+	func_t* f = getn_func(i);
+	return f ? f->start_ea : BADADDR;
+}
+
+static bool rv_fii_set(rv_fii_t& it, ea_t ea) {
+	func_t* f = get_func(ea);
+	return f && it.set(f);
+}
+
+#endif
+
 // Calls cb(ea) for every aligned occurrence of x in the loaded
 // image, excluding matches that sit inside instructions (find_imm already
 // covers those).
@@ -60,8 +83,9 @@ static void find_candidates(std::set<ea_t>& funcs) {
 
 	for (int i = 0, n = get_func_qty(); i < n; i++) {
 
-		ea_t func_ea = get_func_ea_by_num(i);
-		function_item_iterator_t fii;
+		ea_t func_ea = rv_func_start(i);
+		if (func_ea == BADADDR) continue;
+		rv_fii_t fii;
 
 		for (bool ok = fii.set(func_ea); ok; ok = fii.next_code()) {
 
