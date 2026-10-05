@@ -1,0 +1,148 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Single source of truth for supported IDA versions: ida-plugin.json
+  versions:
+    name: Read IDA versions
+    runs-on: ubuntu-latest
+    outputs:
+      ida: ${{ steps.v.outputs.ida }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: echo "ida=$(jq -c '.plugin.idaVersions' ida-plugin.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: versions
+    name: IDA ${{ matrix.ida }} on ${{ matrix.os.name }}
+    runs-on: ${{ matrix.os.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ida: ${{ fromJSON(needs.versions.outputs.ida) }}
+        os:
+          - { runner: ubuntu-latest,  name: linux }
+          - { runner: windows-latest, name: windows }
+          # IDA loads plugins matching its own arch, so build both mac slices
+          - { runner: macos-latest,   name: macos-arm64 }
+          - { runner: macos-15-intel, name: macos-x64 }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Download IDA SDK ${{ matrix.ida }}
+        shell: bash
+        env:
+          HCLI_API_KEY: ${{ secrets.HCLI_API_KEY }}
+        run: |
+          v="${{ matrix.ida }}"
+          uvx --from ida-hcli hcli --disable-updates \
+            download "release/${v}/sdk-and-utilities/idasdk${v//./}.zip"
+          unzip -q idasdk*.zip -d ./ida-temp/
+          # SDK folder layout differs between releases: locate the root via
+          # include/pro.h instead of hard-coding a subdirectory.
+          pro_h="$(find ida-temp -path '*/include/pro.h' | head -n1)"
+          test -n "$pro_h" || { echo "pro.h not found in SDK"; exit 1; }
+          mv "$(dirname "$(dirname "$pro_h")")" ./ida-sdk
+          test -f ida-sdk/cmake/idasdk_init.cmake \
+            || { echo "SDK ${v} has no cmake/idasdk_init.cmake"; exit 1; }
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: "4.2.x"
+
+      - name: Build
+        shell: bash
+        env:
+          IDASDK: ${{ github.workspace }}/ida-sdk
+          OS_NAME: ${{ matrix.os.name }}
+        run: |
+          generator_args=()
+          if [ "$OS_NAME" = "windows" ]; then
+            generator_args=(-A x64)
+          fi
+          cmake -B build -S . \
+            "${generator_args[@]}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build build --config Release
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          for ext in so dll dylib; do
+            f="ida-sdk/bin/plugins/reverb.${ext}"
+            if [ -f "$f" ]; then cp -v "$f" artifacts/; fi
+          done
+          ls artifacts/reverb.* > /dev/null   # fail if no binary was produced
+          cp -r assets artifacts/
+          # Pin the metadata to the IDA version this binary was built against
+          jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverb-ida${{ matrix.ida }}-${{ matrix.os.name }}
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [versions, build]
+    # macOS runner for lipo: merges the two mac slices into one universal dylib
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    name: release for IDA ${{ matrix.ida }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ida: ${{ fromJSON(needs.versions.outputs.ida) }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: parts
+          pattern: reverb-ida${{ matrix.ida }}-*
+
+      - name: Assemble package
+        shell: bash
+        run: |
+          v="${{ matrix.ida }}"
+          p="parts/reverb-ida${v}"
+          mkdir -p pkg
+          cp -R "${p}-linux/." pkg/        # reverb.so + ida-plugin.json + assets/
+          cp "${p}-windows/reverb.dll" pkg/
+          lipo -create \
+            "${p}-macos-arm64/reverb.dylib" \
+            "${p}-macos-x64/reverb.dylib" \
+            -output pkg/reverb.dylib
+          (cd pkg && zip -r "../reverb-ida${v}.zip" .)
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: reverb-ida${{ matrix.ida }}.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
