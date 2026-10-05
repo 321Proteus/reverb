@@ -34,7 +34,7 @@ set(PLUGIN_SOURCES
 set(RV_FORMAT_DIRS VST3 VST2)
 
 foreach(dir ${RV_FORMAT_DIRS})
-    file(GLOB FMT_SOURCES "src/${dir}/*.cpp")
+    file(GLOB FMT_SOURCES CMAKE_CONFIGURE_DEPENDS "src/${dir}/*.cpp")
     list(APPEND PLUGIN_SOURCES ${FMT_SOURCES})
 
     rv_embed_header(
@@ -48,3 +48,5 @@ ida_add_plugin(reverb SOURCES "${PLUGIN_SOURCES}")
 
 target_include_directories(reverb PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(reverb PRIVATE ${CMAKE_BINARY_DIR}/generated)
+
+target_link_options(reverb PRIVATE -Wl,--no-undefined)
