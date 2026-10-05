@@ -87,7 +87,7 @@ static void find_candidates(std::set<ea_t>& funcs) {
 		if (func_ea == BADADDR) continue;
 		rv_fii_t fii;
 
-		for (bool ok = fii.set(func_ea); ok; ok = fii.next_code()) {
+		for (bool ok = rv_fii_set(fii, func_ea); ok; ok = fii.next_code()) {
 
 			ea_t ea = fii.current();
 			insn_t insn;
