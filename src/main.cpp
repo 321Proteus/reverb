@@ -30,8 +30,8 @@ static void apply_interface(rv::Interface iface) {
 		parse_decls(nullptr, decl_src, msg, 0);
 }
 
-static ssize_t idaapi ui_event_callback(void* user_data, int notification_code,
-										va_list va) {
+static ssize_t idaapi ui_event_cb(
+	void* user_data, int notification_code, va_list va) {
 	if (notification_code != ui_database_inited) return 0;
 
 	rv_log("Database init complete - scanning");
@@ -69,8 +69,23 @@ static ssize_t idaapi ui_event_callback(void* user_data, int notification_code,
 
 	apply_interface(iface);
 
+	rv_log("Plugin functionalities will be available once the IDA analysis is "
+		   "finished. You can start browsing the file now.");
+
+	return 0;
+}
+
+static ssize_t idaapi idb_event_cb(
+	void* user_data, int notification_code, va_list va) {
+
+	if (notification_code != idb_event::auto_empty_finally) return 0;
+
+	const rv::Interface iface = rv::get_detected_interface();
 	const rv::FormatModule* mod = rv::get_format_module(iface);
-	if (mod != nullptr && mod->label != nullptr) mod->label();
+
+	if (iface != rv::VST2) return 0;
+
+	if (mod != nullptr && mod->scan != nullptr) mod->scan();
 
 	return 0;
 }
@@ -81,14 +96,17 @@ static plugmod_t* idaapi init(void) {
 		return PLUGIN_SKIP;
 	}
 
-	hook_to_notification_point(HT_UI, ui_event_callback, nullptr);
+	hook_to_notification_point(HT_UI, ui_event_cb, nullptr);
+	hook_to_notification_point(HT_IDB, idb_event_cb);
+
 	rv_log("plugin initialized");
 
 	return PLUGIN_KEEP;
 }
 
 static void idaapi term(void) {
-	unhook_from_notification_point(HT_UI, ui_event_callback);
+	unhook_from_notification_point(HT_UI, ui_event_cb);
+	unhook_from_notification_point(HT_IDB, idb_event_cb);
 	term_hexrays_plugin();
 }
 
@@ -97,12 +115,5 @@ static bool idaapi run(size_t) {
 	return true;
 }
 
-plugin_t PLUGIN = {IDP_INTERFACE_VERSION,
-				   0,
-				   init,
-				   term,
-				   run,
-				   "REverb - the virtual instrument RE toolkit",
-				   "",
-				   "reverb",
-				   ""};
+plugin_t PLUGIN = { IDP_INTERFACE_VERSION, 0, init, term, run,
+	"REverb - the virtual instrument RE toolkit", "", "reverb", "" };

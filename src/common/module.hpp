@@ -5,6 +5,7 @@ namespace rv {
 
 typedef struct {
 	const char* types_decl;
+	void (*scan)();
 	void (*label)();
 } FormatModule;
 
