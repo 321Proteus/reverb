@@ -15,9 +15,7 @@ struct vst_entry_finder_t : public ctree_visitor_t {
 	int idaapi visit_expr(cexpr_t* e) override {
 		if (e->op != cot_call) return 0;
 
-		cexpr_t* callee = e->x;
-		while (callee->op == cot_cast)
-			callee = callee->x;
+		cexpr_t* callee = strip_casts(e->x);
 
 		if (callee->op != cot_var || callee->v.idx != 0) return 0;
 

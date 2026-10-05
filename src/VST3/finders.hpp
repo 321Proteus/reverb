@@ -4,6 +4,7 @@
 #include <ida.hpp>
 #include <segment.hpp>
 #include <vector>
+#include <util.hpp>
 
 // Executable-segment check instead of get_func()/is_code(): vtable targets
 // haven't been analyzed yet when we run
@@ -129,9 +130,7 @@ struct ctor_candidate_finder_t : public ctree_visitor_t {
 	int idaapi visit_expr(cexpr_t* e) override {
 		if (e->op != cot_call) return 0;
 
-		cexpr_t* callee = e->x;
-		while (callee->op == cot_cast)
-			callee = callee->x;
+		cexpr_t* callee = strip_casts(e->x);
 		if (callee->op != cot_obj) return 0;
 
 		carglist_t* args = e->a;
@@ -155,12 +154,6 @@ struct ctor_global_finder_t : public ctree_visitor_t {
 
 	ctor_global_finder_t(ea_t ctor) : ctree_visitor_t(CV_FAST), ctor_ea(ctor) {}
 
-	static cexpr_t* strip_casts(cexpr_t* e) {
-		while (e->op == cot_cast)
-			e = e->x;
-		return e;
-	}
-
 	bool is_call_to_ctor(cexpr_t* e) {
 		e = strip_casts(e);
 		if (e->op != cot_call) return false;
@@ -173,15 +166,13 @@ struct ctor_global_finder_t : public ctree_visitor_t {
 
 		cexpr_t* rhs = strip_casts(e->y);
 
-		// step 1: "v5 = ctor(...)" — remember which local caught the return
-		// value
+		// step 1: "v5 = ctor(...)"
 		if (is_call_to_ctor(rhs)) {
 			cexpr_t* lhs = strip_casts(e->x);
 			if (lhs->op == cot_var) result_var_idx = lhs->v.idx;
 		}
 
-		// step 2: "global = v5" (or "global = ctor(...)" directly, if inlined
-		// further)
+		// step 2: "global = v5" (or "global = ctor(...)" directly)
 		cexpr_t* lhs = strip_casts(e->x);
 		if (lhs->op != cot_obj) return 0;
 

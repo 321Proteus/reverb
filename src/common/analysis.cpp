@@ -1,4 +1,5 @@
 #include "analysis.hpp"
+#include "util.hpp"
 #include <auto.hpp>
 #include <typeinf.hpp>
 
@@ -23,7 +24,10 @@ func_t* ensure_func(ea_t ea) {
 
 bool apply_definite_proto(ea_t ea, const char* decl) {
 	tinfo_t tif;
-	if (!parse_decl(&tif, nullptr, nullptr, decl, PT_SIL)) return false;
+	if (!parse_decl(&tif, nullptr, get_idati(), decl, PT_SIL)) {
+		rv_log("Failed to parse prototype %s", decl);
+		return false;
+	}
 	return apply_tinfo(ea, tif, TINFO_DEFINITE);
 }
 
