@@ -39,6 +39,7 @@ set(PLUGIN_SOURCES
     src/common/module.hpp
     src/common/analysis.cpp
     src/common/analysis.hpp
+    src/common/stores.hpp
 
 )
 

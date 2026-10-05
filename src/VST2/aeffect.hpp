@@ -1,39 +1,17 @@
+#pragma once
+
+#include "common/stores.hpp"
 #include <hexrays.hpp>
 #include <pro.h>
 #include <vector>
 
-namespace rv::vst2 {
-
-// A location consisting of a lvar index and offset
-struct loc_t {
-	int var = -1;
-	int64 off = 0;
-};
-
-// What was stored in a memory location
-struct val_t {
-	enum val_type_t { UNKNOWN, NUM, ADDR, LOCAL } t = UNKNOWN;
-	uint64 num = 0;
-	ea_t ea = BADADDR;
-	loc_t loc;
-	uchar raw[16] = {};
-	int raw_len = 0;
-};
-
 // A resolved AEffect field
-struct field_val_t {
+static struct field_val_t {
 	val_t v;
 	ea_t src_ea = BADADDR;
 };
 
-struct store_t {
-	loc_t loc;
-	int size = 0;
-	val_t val;
-	bool is_or = false;
-	ea_t ea = BADADDR;
-	qstring text;
-};
+namespace rv::vst2 {
 
 struct aeffect_hit_t {
 	ea_t func = BADADDR;
