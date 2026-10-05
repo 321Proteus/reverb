@@ -18,17 +18,13 @@ struct PFactoryInfo {
 	char email[128];
 	int32_t flags;
 };
-// 64 + 256 + 128 + 4 = 452 bytes — matches the memcpy(dest, "SFZTools", 0x1C4)
-// we found weeks ago, independently confirmed
 
 struct PClassInfo {
-	char cid[16]; // 16-byte class GUID (TUID)
+	char cid[16];
 	int32_t cardinality;
 	char category[32];
 	char name[64];
 };
-// 116 bytes — the base/v1 struct, used by the plain registerClass(PClassInfo*,
-// ...) call
 
 struct PClassInfo2 {
 	char cid[16];
