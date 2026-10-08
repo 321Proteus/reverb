@@ -1,3 +1,4 @@
+#include "VST2/opcode.hpp"
 #include "common/analysis.hpp"
 #include "aeffect.hpp"
 #include "vst2.hpp"
@@ -168,6 +169,7 @@ static bool load_aeffect_layout(
 }
 
 void scan() {
+
 	std::set<ea_t> candidates;
 	find_candidates(candidates);
 
@@ -198,6 +200,11 @@ void scan() {
 
 	for (const aeffect_hit_t& h : all_hits) {
 		apply_aeffect(fields, h, all_hits.size() > 1);
+
+		auto d = h.fields.find("dispatcher");
+		dispatcher_info_t info;
+		if (d != h.fields.end() && analyze_dispatcher(d->second.v.ea, info))
+			apply_dispatcher(info);
 	}
 }
 } // namespace rv::vst2
