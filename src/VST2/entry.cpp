@@ -13,16 +13,20 @@
 #include <ua.hpp>
 
 namespace rv::vst2 {
-void label_entry() {
+
+ea_t find_entry() {
 	static const char* const kEntryNames[] = { "VSTPluginMain",
 		"_VSTPluginMain", "main" };
 
-	ea_t entry_ea = BADADDR;
 	for (const char* name : kEntryNames) {
-		entry_ea = get_name_ea(BADADDR, name);
-		if (entry_ea != BADADDR) break;
+		const ea_t ea = get_name_ea(BADADDR, name);
+		if (ea != BADADDR) return ea;
 	}
+	return BADADDR;
+}
 
+void label_entry() {
+	const ea_t entry_ea = find_entry();
 	if (entry_ea == BADADDR) {
 		rv_log("No valid VST2 entry point found");
 		return;

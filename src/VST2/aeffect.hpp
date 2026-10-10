@@ -2,11 +2,12 @@
 
 #include "common/stores.hpp"
 #include <hexrays.hpp>
+#include <map>
 #include <pro.h>
 #include <vector>
 
 // A resolved AEffect field
-static struct field_val_t {
+struct field_val_t {
 	val_t v;
 	ea_t src_ea = BADADDR;
 };
@@ -31,7 +32,7 @@ struct aeffect_field_t {
 	fkind_t kind;
 };
 
-static const char* const members[] = {
+inline constexpr const char* members[] = {
 	"dispatcher",
 	"process",
 	"setParameter",

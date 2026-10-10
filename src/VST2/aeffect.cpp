@@ -15,15 +15,6 @@ namespace rv::vst2 {
 
 namespace {
 
-qstring fourcc(uint32 v) {
-	char c[5] = { char(v >> 24), char(v >> 16), char(v >> 8), char(v), 0 };
-	for (int i = 0; i < 4; i++)
-		if (uchar(c[i]) < 0x20 || uchar(c[i]) >= 0x7F) c[i] = '.';
-	qstring s;
-	s.sprnt("'%s' (0x%08X)", c, v);
-	return s;
-}
-
 qstring val_str(const val_t& v, const aeffect_hit_t& h) {
 	qstring s;
 	switch (v.t) {
@@ -126,6 +117,8 @@ qstring flags_str(uint32 f) {
 		{ 1u << 5, "ProgramChunks" },
 		{ 1u << 8, "IsSynth" },
 		{ 1u << 9, "NoSoundInStop" },
+		{ 1u << 10, "ExtIsAsync" },
+		{ 1u << 11, "ExtHasBuffer" },
 		{ 1u << 12, "CanDoubleReplacing" },
 	};
 	qstring s;
@@ -149,13 +142,14 @@ qstring proto_for(const char* field) {
 	const char* ip =
 		type_exists("VstIntPtr") ? "VstIntPtr" : (is64 ? "__int64" : "int");
 	const char* i32 = type_exists("VstInt32") ? "VstInt32" : "int";
+	const char* op = type_exists("VstOpcode") ? "VstOpcode" : i32;
 	const char* eff = type_exists("AEffect") ? "AEffect *" : "void *";
 
 	qstring d;
 	if (!strcmp(field, "dispatcher"))
 		d.sprnt("%s __cdecl f(%seffect, %s opcode, %s index, %s value, void "
 				"*ptr, float opt);",
-			ip, eff, i32, i32, ip);
+			ip, eff, op, i32, ip);
 	else if (!strcmp(field, "process") || !strcmp(field, "processReplacing"))
 		d.sprnt("void __cdecl f(%seffect, float **inputs, float **outputs, %s "
 				"sampleFrames);",

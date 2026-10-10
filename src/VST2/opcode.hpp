@@ -1,12 +1,22 @@
 #pragma once
 
-#include <pro.h>
 #include <map>
+#include <pro.h>
+#include <set>
 #include <vector>
 #include <set>
 
-constexpr int MAX_DEPTH = 3;
+constexpr int MAX_DEPTH = 4;
+constexpr int MAX_HARVEST_DEPTH = 2;
+constexpr int MAX_ENTRY_DEPTH = 2;
 constexpr uint32 MAX_OPCODE = 0xFF;
+
+constexpr int ARG_OPC = 1;
+constexpr int ARG_PTR = 4;
+
+constexpr uint32 EFF_GET_PLUG_CATEGORY = 35;
+constexpr uint32 EFF_CAN_DO = 51;
+constexpr uint32 EFF_GET_VST_VERSION = 58;
 
 constexpr struct str_op_t {
 	uint32 op;
@@ -32,17 +42,31 @@ inline const char* category_name(uint64 c) {
 
 namespace rv::vst2 {
 
+// Dispatcher opcode handling
 struct dispatcher_info_t {
-	ea_t dispatcher = BADADDR;
-	ea_t switch_func = BADADDR;
-	std::set<uint32> handled;		   // opcodes with a case
+	ea_t dispatcher = BADADDR;	// AEffect::dispatcher
+	ea_t switch_func = BADADDR; // first function with a real opcode switch
+	ea_t vtable = BADADDR;		// plugin object vtable used for virtual calls
+	qstring class_name;			// from RTTI, if present
+	std::set<uint32> handled;	// opcodes with a dedicated case
 	std::map<uint32, qstring> strings; // effGetEffectName etc. -> literal
-	std::map<uint32, uint64> consts;   // effGetVstVersion etc. -> retval
-	std::vector<qstring> can_do;	   // effCanDo strings -> canDo capabiliteis
+	std::map<uint32, uint64> consts;   // effGetVstVersion etc. -> return value
+	std::vector<qstring> can_do;	   // strings seen in effCanDo
 };
 
-bool analyze_dispatcher(ea_t dispatcher_ea, dispatcher_info_t& out);
-void apply_dispatcher(const dispatcher_info_t& info);
+// Most derived vtable of the plugin object, found by following the
+// audioMaster argument from the VST2 entry point to the constructor.
+ea_t find_plugin_vtable(ea_t entry_ea);
+
+/*
+	Walk the dispatcher, following direct and virtual forwarding calls.
+	object_off: byte offset of AEffect::object (-1 if unknown).
+*/
+bool analyze_dispatcher(
+	ea_t dispatcher_ea, ea_t vtable, int64 object_off, dispatcher_info_t& out);
+
+// Results for one dispatcher; several when a shell plugin shares it
+void apply_dispatcher(const std::vector<dispatcher_info_t>& infos);
 
 // Opcode name from the VstOpcode enum in local types, or "opcode_N"
 qstring opcode_name(uint32 op);

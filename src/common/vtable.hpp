@@ -9,6 +9,7 @@
 #include <ida.hpp>
 #include <nalt.hpp>
 #include <name.hpp>
+#include <map>
 #include <set>
 #include <vector>
 #include <xref.hpp>
@@ -137,14 +138,23 @@ inline ea_t vtable_slot(ea_t vt, int slot) {
 	return is_code_addr(t) ? resolve_thunk(t) : BADADDR;
 }
 
-// Tracks the locals that hold one object (objvars) and its vtable (vtvars) and
-// finds virtual calls for it
+/*
+	Tracks the locals that hold one object (objvars), its vtable (vtvars) and
+	methods loaded from it (fnvars), and finds virtual calls for it. Pointers
+	reached through the fields (parts) are other objects, e.g. a
+	wrapper's plugin member: calls on them are followed but the vtable doesnt
+   matter
+*/
 struct obj_tracker_t {
 
 	std::set<int> objvars;
 	std::set<int> vtvars;
+	std::map<int, int> fnvars; // locals holding vtable loaded methods
+	std::set<int> parts;
 	int src_var = -1; // object = *(src_var + src_off), e.g. effect->object
 	int64 src_off = -1;
+
+	ea_t vtable = BADADDR;
 
 	bool is_object(cexpr_t* e) const {
 		e = strip_casts(e);
@@ -167,16 +177,55 @@ struct obj_tracker_t {
 		return false;
 	}
 
-	// vX = obj / vX = *obj; call for every assignment
+	/*
+		Pointer reached through the object: obj->field, *(obj + k), &obj->m,
+		obj + k, recursively. Never the object or its vptr (*obj).
+	*/
+	bool is_part(cexpr_t* e) const {
+		e = strip_casts(e);
+		if (e == nullptr) return false;
+
+		auto rooted = [&](cexpr_t* b) { return is_object(b) || is_part(b); };
+		auto field = [&](cexpr_t* a) { // obj + k, k != 0
+			a = strip_casts(a);
+			if (a->op != cot_add) return false;
+			cexpr_t* n = strip_casts(a->y);
+			return n->op == cot_num && n->numval() != 0 && rooted(a->x);
+		};
+
+		switch (e->op) {
+		case cot_var:
+			return parts.count(e->v.idx) != 0;
+		case cot_memptr:
+			return e->m != 0 && rooted(e->x);
+		case cot_ptr:
+			return field(e->x);
+		case cot_add:
+			return field(e);
+		case cot_ref: {
+			cexpr_t* m = strip_casts(e->x);
+			return m->op == cot_memptr && rooted(m->x);
+		}
+		default:
+			return false;
+		}
+	}
+
+	// vX = obj / *obj / (*obj)[n] / obj->field call for every assignment
 	void absorb(cexpr_t* asg) {
 		if (asg->op != cot_asg) return;
 
 		cexpr_t* l = strip_casts(asg->x);
 		if (l->op != cot_var) return;
 
+		int slot;
 		if (is_object(asg->y)) objvars.insert(l->v.idx);
 		else if (is_vtable(asg->y))
 			vtvars.insert(l->v.idx);
+		else if (vcall_slot(asg->y, slot))
+			fnvars[l->v.idx] = slot; // method hoisted out of a branch
+		else if (is_part(asg->y))
+			parts.insert(l->v.idx);
 	}
 
 	/*
@@ -184,6 +233,7 @@ struct obj_tracker_t {
 		(*(fn **)(*(_QWORD *)obj + 8))(obj, ...)	byte offset
 		(*((fn **)*obj + 1))(obj, ...)				scaled pointer arithmetic
 		v7 = *obj; v7[1](obj, ...)					index into a vtable local
+		v8 = *(*obj + 8); v8(obj, ...)				method local
 		obj->vfptr->member(...)						typed vtable
 		The vtable itself must come from the object, which rejects plain
 		function pointer fields such as obj->callback().
@@ -194,6 +244,13 @@ struct obj_tracker_t {
 		int64 off = 0;
 
 		switch (e->op) {
+
+		case cot_var: {
+			auto it = fnvars.find(e->v.idx);
+			if (it == fnvars.end()) return false;
+			slot = it->second;
+			return true;
+		}
 
 		case cot_memptr:
 			vt = e->x;
@@ -236,6 +293,12 @@ struct obj_tracker_t {
 
 		slot = int(off / psz);
 		return true;
+	}
+
+	// Virtual call target, BADADDR if not virtual
+	ea_t vcall_target(cexpr_t* callee) const {
+		int slot;
+		return vcall_slot(callee, slot) ? vtable_slot(vtable, slot) : BADADDR;
 	}
 };
 

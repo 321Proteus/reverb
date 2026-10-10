@@ -14,6 +14,14 @@ func_t* ensure_func(ea_t ea);
 // ensure_func + decompile. logs and returns nullptr on failure
 cfuncptr_t decompile_at(ea_t ea, int flags = DECOMP_NO_WAIT);
 
+/*
+	decompile_at, but when Hex-Rays guessed fewer than min_args arguments
+	(float args in xmm, a misdetected __thiscall), retype the function from
+	the prototype at a call site that passes them all and decompile again.
+	Never overrides a user-set type.
+*/
+cfuncptr_t decompile_with_args(ea_t ea, int min_args, const tinfo_t* site);
+
 // Follow jump and this-adjusting thunks
 ea_t resolve_thunk(ea_t ea, int max_hops = 3);
 

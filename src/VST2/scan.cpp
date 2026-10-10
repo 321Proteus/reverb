@@ -1,5 +1,6 @@
 #include "VST2/opcode.hpp"
 #include "common/analysis.hpp"
+#include "common/vtable.hpp"
 #include "aeffect.hpp"
 #include "vst2.hpp"
 #include "util.hpp"
@@ -7,12 +8,16 @@
 #include <funcs.hpp>
 #include <hexrays.hpp>
 #include <ida.hpp>
+#include <nalt.hpp>
 #include <name.hpp>
 #include <pro.h>
 #include <search.hpp>
 #include <bytes.hpp>
+#include <cstring>
 #include <segment.hpp>
+#include <map>
 #include <set>
+#include <utility>
 #include <ua.hpp>
 
 #if IDA_SDK_VERSION >= 940
@@ -78,7 +83,12 @@ static void iterate_magic_dword(F&& cb, uint32 x = VST2_MAGIC) {
 
 static void find_candidates(std::set<ea_t>& funcs) {
 
+	char buf[256];
+	get_input_file_path(buf, sizeof(buf));
+
+	rv_log("waiting for analysis of %s", buf);
 	auto_wait();
+
 	const bool arm64 = (inf_get_procname() == "arm") && inf_is_64bit();
 	int hits = 0;
 
@@ -144,28 +154,57 @@ static bool load_aeffect_layout(
 			sz == BADSIZE ? -1 : int(sz), expected);
 		return false;
 	}
+
 	total_size = int(sz);
 
 	for (const char* name : members) {
 		udm_t udm;
 		udm.name = name;
+
 		if (t.find_udm(&udm, STRMEM_NAME) < 0) {
 			rv_log("AEffect::%s missing from types.hpp, skipping", name);
 			continue;
 		}
+
 		fkind_t k = udm.type.is_funcptr() ? F_FN
 					: udm.type.is_ptr()	  ? F_PTR
 										  : F_INT;
 		out.push_back({ name, int(udm.offset / 8), int(udm.size / 8),
 			k }); // udm is in bits
 
-		rv_log("  layout: %-22s +%-3d size %d %s", name, int(udm.offset / 8),
-			int(udm.size / 8),
-			k == F_FN	 ? "fn"
-			: k == F_PTR ? "ptr"
-						 : "int");
+		// rv_log("  layout: %-22s +%-3d size %d %s", name, int(udm.offset / 8),
+		// 	int(udm.size / 8),
+		// 	k == F_FN	 ? "fn"
+		// 	: k == F_PTR ? "ptr"
+		// 				 : "int");
 	}
 	return !out.empty();
+}
+
+/*
+	Most derived vtables of the object behind an AEffect. When the AEffect
+	initializer stores its own `this` as AEffect::object (SDK AudioEffect, JUCE
+	wrapper), it is a constructor and the classes built on top of it are the
+	plugin classes. Otherwise follow audioMaster from the entry point.
+*/
+static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
+	auto o = h.fields.find("object");
+
+	if (o != h.fields.end() && o->second.v.t == val_t::LOCAL &&
+		o->second.v.loc.var == h.root && o->second.v.loc.off == 0) {
+
+		cfuncptr_t cf = decompile_at(h.func);
+
+		if (cf != nullptr && !cf->argidx.empty() && cf->argidx[0] == h.root) {
+			std::vector<ea_t> v = most_derived_vtables(h.func);
+			if (!v.empty()) return v;
+		}
+	}
+
+	const ea_t vt = find_plugin_vtable(find_entry());
+	if (vt == BADADDR) return {};
+
+	return { vt };
 }
 
 void scan() {
@@ -180,31 +219,43 @@ void scan() {
 	load_aeffect_layout(fields, size);
 
 	for (const ea_t c_ea : candidates) {
-
-		func_t* f = ensure_func(c_ea);
-		if (f) {
-			hexrays_failure_t hf;
-			cfuncptr_t cf = decompile(f, &hf, DECOMP_NO_WAIT);
-
-			if (!cf) {
-				rv_log("Failed to decompile %a: %s", f->start_ea,
-					hf.desc().c_str());
-			} else {
-				auto hits = extract_aeffects(fields, size, cf);
-				all_hits.insert(all_hits.end(), hits.begin(), hits.end());
-			}
-		} else {
-			rv_log("No function at candidate %a", c_ea);
+		cfuncptr_t cf = decompile_at(c_ea);
+		if (cf != nullptr) {
+			auto hits = extract_aeffects(fields, size, cf);
+			all_hits.insert(all_hits.end(), hits.begin(), hits.end());
 		}
 	}
+
+	int64 object_off = -1;
+	for (const aeffect_field_t& f : fields)
+		if (strcmp(f.name, "object") == 0) object_off = f.off;
+
+	// Some plugins share a single dispatcher between classes
+	std::map<ea_t, std::vector<dispatcher_info_t>> results;
+	std::set<std::pair<ea_t, ea_t>> done; // (dispatcher, vtable)
 
 	for (const aeffect_hit_t& h : all_hits) {
 		apply_aeffect(fields, h, all_hits.size() > 1);
 
 		auto d = h.fields.find("dispatcher");
-		dispatcher_info_t info;
-		if (d != h.fields.end() && analyze_dispatcher(d->second.v.ea, info))
-			apply_dispatcher(info);
+		if (d == h.fields.end() || d->second.v.t != val_t::ADDR) continue;
+		const ea_t disp = d->second.v.ea;
+
+		std::vector<ea_t> vtables = plugin_vtables(h);
+		if (vtables.empty()) vtables.push_back(BADADDR); // direct only
+
+		for (const ea_t vt : vtables) {
+			if (!done.insert({ disp, vt }).second) continue;
+			rv_log("Plugin object vtable %a (%s)", vt,
+				vt == BADADDR ? "none" : rtti_class_name(vt).c_str());
+
+			dispatcher_info_t info;
+			if (analyze_dispatcher(disp, vt, object_off, info))
+				results[disp].push_back(std::move(info));
+		}
 	}
+
+	for (const auto& [disp, infos] : results)
+		apply_dispatcher(infos);
 }
 } // namespace rv::vst2

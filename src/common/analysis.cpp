@@ -1,6 +1,7 @@
 #include "analysis.hpp"
 #include "util.hpp"
 #include <auto.hpp>
+#include <nalt.hpp>
 #include <ua.hpp>
 #include <xref.hpp>
 #include <typeinf.hpp>
@@ -86,6 +87,28 @@ ea_t resolve_thunk(ea_t ea, int max_hops) {
 	}
 
 	return ea;
+}
+
+cfuncptr_t decompile_with_args(ea_t ea, int min_args, const tinfo_t* site) {
+	cfuncptr_t cf = decompile_at(ea);
+	if (cf == nullptr || int(cf->argidx.size()) >= min_args) return cf;
+
+	tinfo_t ft;
+	if (site != nullptr) ft = site->is_funcptr() ? site->get_pointed_object() : *site;
+
+	if (!ft.is_func() || ft.get_nargs() < min_args || is_userti(ea)) {
+		rv_log("%a: decompiled with %u args, %d needed", ea,
+			unsigned(cf->argidx.size()), min_args);
+		return cf;
+	}
+	if (!apply_tinfo(ea, ft, TINFO_DEFINITE)) return cf;
+
+	mark_cfunc_dirty(ea);
+	rv_log("%a: retyped from call site (%u -> %d args)", ea,
+		unsigned(cf->argidx.size()), ft.get_nargs());
+
+	cfuncptr_t again = decompile_at(ea);
+	return again != nullptr ? again : cf;
 }
 
 bool apply_definite_proto(ea_t ea, const char* decl) {
