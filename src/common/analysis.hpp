@@ -11,6 +11,12 @@ namespace rv {
 // whole auto-analysis queue. Returns nullptr if no function can be made.
 func_t* ensure_func(ea_t ea);
 
+// ensure_func + decompile. logs and returns nullptr on failure
+cfuncptr_t decompile_at(ea_t ea, int flags = DECOMP_NO_WAIT);
+
+// Follow jump and this-adjusting thunks
+ea_t resolve_thunk(ea_t ea, int max_hops = 3);
+
 // Parse a C declaration and apply it as a user-defined (definite) type.
 bool apply_definite_proto(ea_t ea, const char* decl);
 

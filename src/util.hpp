@@ -1,4 +1,5 @@
 #pragma once
+#include <bytes.hpp>
 #include <hexrays.hpp>
 #include <pro.h>
 #include <kernwin.hpp>
@@ -46,4 +47,11 @@ inline bool is_code_addr(ea_t ea) {
 	if (get_func(ea) != nullptr) return true;
 	if (is_code(f)) return true;
 	return in_exec_seg(ea); // not analyzed yet, but in a code segment
+}
+
+inline int ptr_size() { return inf_is_64bit() ? 8 : 4; }
+
+// Pointer-sized db load
+inline ea_t read_ptr(ea_t ea) {
+	return ptr_size() == 8 ? ea_t(get_qword(ea)) : ea_t(get_dword(ea));
 }

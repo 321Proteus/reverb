@@ -40,7 +40,8 @@ set(PLUGIN_SOURCES
     src/common/analysis.cpp
     src/common/analysis.hpp
     src/common/stores.hpp
-
+    src/common/vtable.hpp
+    src/common/dispatch.hpp
 )
 
 set(RV_FORMAT_DIRS VST3 VST2)
@@ -59,6 +60,23 @@ endforeach()
 ida_add_plugin(reverb SOURCES "${PLUGIN_SOURCES}")
 
 target_include_directories(reverb PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+# The IDA SDK silences warnings with -w, which also disables -Werror
+# so we need to swap it for an equivalent that doesn't
+if (MSVC)
+    target_compile_options(reverb PRIVATE /we4715 /we4716)
+else()
+    get_target_property(RV_OPTS reverb COMPILE_OPTIONS)
+    list(REMOVE_ITEM RV_OPTS -w)
+    set_property(TARGET reverb PROPERTY COMPILE_OPTIONS ${RV_OPTS})
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(reverb PRIVATE -Wno-everything)
+    else()
+        # IDA's %a format specifier trips -Wformat
+        target_compile_options(reverb PRIVATE -Wno-format)
+    endif()
+    target_compile_options(reverb PRIVATE -Werror=return-type)
+endif()
 target_include_directories(reverb PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 if (UNIX AND NOT APPLE)

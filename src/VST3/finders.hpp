@@ -1,103 +1,7 @@
 #pragma once
-#include <bytes.hpp>
+#include "common/vtable.hpp"
+#include "util.hpp"
 #include <hexrays.hpp>
-#include <ida.hpp>
-#include <segment.hpp>
-#include <vector>
-#include <util.hpp>
-
-// Executable-segment check instead of get_func()/is_code(): vtable targets
-// haven't been analyzed yet when we run
-static bool is_exec_ea(ea_t ea) {
-	segment_t* s = getseg(ea);
-	return s != nullptr &&
-		   ((s->perm & SEGPERM_EXEC) != 0 || s->type == SEG_CODE);
-}
-
-static int vtable_run_length(ea_t start_ea, int max_entries = 64) {
-	const int ptrsz = inf_is_64bit() ? 8 : 4;
-	int count = 0;
-
-	for (int i = 0; i < max_entries; i++) {
-
-		ea_t slot = start_ea + i * ptrsz;
-		if (!is_loaded(slot)) break;
-
-		ea_t target = ptrsz == 8 ? get_qword(slot) : get_dword(slot);
-		if (target == 0 || !is_exec_ea(target)) break;
-		count++;
-	}
-
-	return count;
-}
-
-static bool looks_like_vtable(ea_t ea) { return vtable_run_length(ea) >= 2; }
-
-struct vtable_store_finder_t : public ctree_visitor_t {
-	struct hit_t {
-		sval_t this_offset;
-		ea_t vtable_ea;
-		int var_idx;
-		ea_t ctor_ea = BADADDR;
-	};
-
-	std::vector<hit_t> hits;
-	vtable_store_finder_t() : ctree_visitor_t(CV_FAST) {}
-
-	int idaapi visit_expr(cexpr_t* e) override {
-
-		if (e->op != cot_asg) return 0;
-
-		cexpr_t* rhs = e->y;
-		if (rhs->op == cot_ref) rhs = rhs->x;
-		if (rhs->op != cot_obj)
-			return 0; // must be a direct ref to a global address
-
-		ea_t candidate_ea = rhs->obj_ea;
-		if (!looks_like_vtable(candidate_ea)) return 0;
-
-		cexpr_t* lhs = e->x;
-		if (lhs->op != cot_ptr) // must be a dereference *(...)
-			return 0;
-
-		cexpr_t* addr = lhs->x;
-		while (addr->op == cot_cast)
-			addr = addr->x;
-
-		sval_t offset = 0;
-		cexpr_t* base = addr;
-		if (addr->op == cot_add) {
-			cexpr_t *l = addr->x, *r = addr->y;
-			if (r->op == cot_num) {
-				base = l;
-				offset = r->numval();
-			} else if (l->op == cot_num) {
-				base = r;
-				offset = l->numval();
-			} else
-				return 0;
-		}
-		while (base->op == cot_cast)
-			base = base->x;
-
-		if (base->op != cot_var) return 0;
-
-		hits.push_back({ offset, candidate_ea, base->v.idx });
-		return 0;
-	}
-};
-
-inline bool label_vtable(ea_t vtbl_ea, const char* type_name) {
-	tinfo_t ti;
-	if (!ti.get_named_type(nullptr, type_name)) return false;
-
-	size_t sz = ti.get_size();
-	if (sz == BADSIZE) return false;
-
-	del_items(vtbl_ea, DELIT_EXPAND, sz);
-
-	return apply_tinfo(vtbl_ea, ti, TINFO_DEFINITE);
-}
 
 struct global_assign_finder_t : public ctree_visitor_t {
 	int target_var_idx;
@@ -119,31 +23,6 @@ struct global_assign_finder_t : public ctree_visitor_t {
 
 		global_ea = lhs->obj_ea;
 		return 1;
-	}
-};
-
-struct ctor_candidate_finder_t : public ctree_visitor_t {
-	std::vector<ea_t> candidates;
-
-	ctor_candidate_finder_t() : ctree_visitor_t(CV_FAST) {}
-
-	int idaapi visit_expr(cexpr_t* e) override {
-		if (e->op != cot_call) return 0;
-
-		cexpr_t* callee = strip_casts(e->x);
-		if (callee->op != cot_obj) return 0;
-
-		carglist_t* args = e->a;
-		if (!args || args->empty()) return 0;
-
-		cexpr_t* arg0 = &args->at(0);
-		while (arg0->op == cot_cast)
-			arg0 = arg0->x;
-
-		if (arg0->op != cot_var) return 0;
-
-		candidates.push_back(callee->obj_ea);
-		return 0;
 	}
 };
 
