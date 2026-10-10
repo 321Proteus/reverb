@@ -30,6 +30,16 @@ static void apply_interface(rv::Interface iface) {
 		parse_decls(nullptr, decl_src, msg, 0);
 }
 
+static void run_scan(rv::Interface iface) {
+
+	if (iface != rv::VST2) return;
+
+	const rv::FormatModule* mod = rv::get_format_module(iface);
+	if (!mod) return;
+	if (mod->scan != nullptr) mod->scan();
+	if (mod->label != nullptr) mod->label();
+}
+
 static ssize_t idaapi ui_event_cb(
 	void* user_data, int notification_code, va_list va) {
 	if (notification_code != ui_database_inited) return 0;
@@ -69,8 +79,13 @@ static ssize_t idaapi ui_event_cb(
 
 	apply_interface(iface);
 
-	rv_log("Plugin functionalities will be available once the IDA analysis is "
-		   "finished. You can start browsing the file now.");
+	if (auto_is_ok()) {
+		rv_log("Analysis already performed, scanning now");
+		run_scan(iface);
+	} else {
+		rv_log("Plugin functionalities will be available once the IDA "
+			   "analysis is finished. You can start browsing the file now.");
+	}
 
 	return 0;
 }
@@ -80,12 +95,7 @@ static ssize_t idaapi idb_event_cb(
 
 	if (notification_code != idb_event::auto_empty_finally) return 0;
 
-	const rv::Interface iface = rv::get_detected_interface();
-	const rv::FormatModule* mod = rv::get_format_module(iface);
-
-	if (iface != rv::VST2) return 0;
-
-	if (mod != nullptr && mod->scan != nullptr) mod->scan();
+	run_scan(rv::get_detected_interface());
 
 	return 0;
 }
