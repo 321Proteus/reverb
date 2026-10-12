@@ -83,7 +83,7 @@ static ssize_t idaapi ui_event_cb(
 		rv_log("Analysis already performed, scanning now");
 		run_scan(iface);
 	} else {
-		rv_log("Plugin functionalities will be available once the IDA "
+		rv_log("The metadata scan will run once the IDA "
 			   "analysis is finished. You can start browsing the file now.");
 	}
 

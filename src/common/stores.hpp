@@ -49,6 +49,25 @@ inline int64 scaled_off(const cexpr_t* e, int64 k) {
 	return k;
 }
 
+inline bool fold_addr(cexpr_t* e, const alias_map_t* alias, loc_t& out);
+inline bool fold_lvalue(
+	cexpr_t* e, const alias_map_t* alias, loc_t& out, int& size);
+
+// Address of x[k]: x + k * sizeof(el)
+inline bool fold_idx(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
+	cexpr_t* n = strip_casts(e->y);
+	if (n->op != cot_num) return false;
+
+	int sz;
+	const bool ok = e->x->type.is_array() ? fold_lvalue(e->x, alias, out, sz)
+										  : fold_addr(e->x, alias, out);
+	if (!ok) return false;
+
+	const int es = e->x->type.get_ptrarr_objsize();
+	out.off += int64(n->numval()) * (es > 0 ? es : 1);
+	return true;
+}
+
 // Fold an address expression into a loc_t
 inline bool fold_addr(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 	e = strip_casts(e);
@@ -78,13 +97,9 @@ inline bool fold_addr(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 		return true;
 	}
 
-	case cot_ref: { // &a1->field
-		cexpr_t* x = strip_casts(e->x);
-		if (x->op == cot_memptr && fold_addr(x->x, alias, out)) {
-			out.off += x->m;
-			return true;
-		}
-		return false;
+	case cot_ref: { // &a1->field, &a1[3]
+		int sz;
+		return fold_lvalue(e->x, alias, out, sz);
 	}
 
 	default:
@@ -105,6 +120,11 @@ inline bool fold_lvalue(
 	if (e->op == cot_memptr && fold_addr(e->x, alias, out)) {
 		out.off += e->m;
 		size = e->ptrsize;
+		return true;
+	}
+	if (e->op == cot_idx && fold_idx(e, alias, out)) { // a1[22]
+		const size_t es = e->type.get_size();
+		size = es == BADSIZE ? 0 : int(es);
 		return true;
 	}
 	return false;
@@ -247,9 +267,12 @@ struct store_collector_t : public ctree_visitor_t {
 		}
 
 		default: {
-			// A pointer into a tracked object
+			// A pointer into a tracked object. Pointer-sized only: a plain
+			// int local (numPrograms = v30) also folds as a bare var.
 			loc_t l;
-			if (fold_addr(e, &alias, l)) {
+			if ((e->type.is_ptr() ||
+					e->type.get_size() == size_t(ptr_size())) &&
+				fold_addr(e, &alias, l)) {
 				v.t = val_t::LOCAL;
 				v.loc = l;
 			}
