@@ -199,9 +199,18 @@ inline bool label_vtable(ea_t vtbl_ea, const char* type_name) {
 		role.sprnt("%s::%s", owner.c_str(), m.name.c_str());
 		
 		int refs = 0;
-		xrefblk_t xref;
-		for (bool ok = xref.first_to(target, XREF_DATA); ok; ok = xref.next_to())
-			if (!is_code(get_flags(xref.from))) refs++;
+		xrefblk_t xb;
+		for (bool ok = xb.first_to(target, XREF_DATA); ok; ok = xb.next_to()) {
+			if (xb.type != dr_O || is_code(get_flags(xb.from)))
+				continue;
+
+			const ea_t end = get_item_end(xb.from);
+			int ptr = ptr_size();
+
+			for (ea_t ref = xb.from; ref + ptr <= end; ref += ptr) {
+				if (read_ptr(ref) == target) refs++;
+			}
+		}
 
 		if (refs > 1) {
 			qstring cmt;
@@ -219,16 +228,16 @@ inline bool label_vtable(ea_t vtbl_ea, const char* type_name) {
 			set_name(target, role.c_str(), SN_NOWARN | SN_FORCE);
 
 		if (!is_userti(target)) {
-			tinfo_t ft = m.type.get_pointed_object(); // member is a pointer to function
-
+			 // member is a pointer to function
+			tinfo_t ft = m.type.get_pointed_object();
 			if (!owner_ti.empty()) {
 				func_type_data_t ftd;
 
 				if (ft.get_func_details(&ftd) && !ftd.empty()) {
 					tinfo_t this_ptr;
 					this_ptr.create_ptr(owner_ti);
-					ftd[0].type = this_ptr;  // keeps argloc and the __hidden flag
-					ft.create_func(ftd);	// keeps the calling convention from ftd
+					ftd[0].type = this_ptr;
+					ft.create_func(ftd);
 				}
 			}
 
