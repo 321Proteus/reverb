@@ -41,6 +41,7 @@ set(PLUGIN_SOURCES
     src/common/analysis.hpp
     src/common/stores.hpp
     src/common/vtable.hpp
+    src/common/vtable.cpp
     src/common/dispatch.hpp
 )
 
