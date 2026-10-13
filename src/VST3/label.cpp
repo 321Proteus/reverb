@@ -5,6 +5,7 @@
 #include "VST3/vst3.hpp"
 #include "VST3/finders.hpp"
 #include "common/analysis.hpp"
+#include "common/vtable.hpp"
 #include "util.hpp"
 
 void rv::vst3::label_factory() {
@@ -68,9 +69,11 @@ void rv::vst3::label_factory() {
 	}
 
 	for (auto& h : vfinder.hits) {
+		
 		if (h.this_offset) continue;
+			const char* type = pick_vtable_type(h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl", "IPluginFactory_vtbl" });
 
-		if (!label_vtable(h.vtable_ea, "IPluginFactory_vtbl")) {
+		if (type == nullptr || !label_vtable(h.vtable_ea, type)) {
 			rv_log("label_vtable failed at %a", h.vtable_ea);
 			continue;
 		} else {
