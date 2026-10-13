@@ -1,0 +1,3 @@
+#pragma once
+#include "_rv_libc.h"
+namespace std { typedef decltype(nullptr) nullptr_t; }

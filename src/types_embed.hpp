@@ -2,6 +2,7 @@
 #include "reverb.hpp"
 #include "VST2_types_embed.hpp"
 #include "VST3_types_embed.hpp"
+#include <ida.hpp>
 // #include "AAX_types_embed.hpp"
 // #include "CLAP_types_embed.hpp"
 
@@ -23,4 +24,14 @@ inline const char* get_types_decl(Interface iface) {
 		return nullptr;
 	}
 }
+
+// Generated decls spell the SDK's PLUGIN_API as __RV_API: __stdcall on
+// 32-bit Windows, nothing elsewhere. Resolve it for the current database.
+inline qstring prepare_types_decl(const char* src) {
+	qstring s(src);
+	const bool stdcall = !inf_is_64bit() && inf_get_filetype() == f_PE;
+	s.replace("__RV_API", stdcall ? "__stdcall" : "");
+	return s;
+}
+
 } // namespace rv

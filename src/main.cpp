@@ -27,12 +27,10 @@ static void apply_interface(rv::Interface iface) {
 	if (decl_src == nullptr)
 		rv_log("No type declarations compiled in for %s", name.c_str());
 	else
-		parse_decls(nullptr, decl_src, msg, 0);
+		parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
 }
 
 static void run_scan(rv::Interface iface) {
-
-	if (iface != rv::VST2) return;
 
 	const rv::FormatModule* mod = rv::get_format_module(iface);
 	if (!mod) return;
