@@ -180,7 +180,7 @@ struct sel_walker_t : public ctree_visitor_t {
 				f.args.obj = 0;
 			}
 		} else if (obj.vcall_slot(fn, f.slot)) {
-			f.callee = vtable_slot(obj.vtable, f.slot);
+			f.callee = vtbl::slot_func(obj.vtable, f.slot);
 			f.args.obj = 0;
 			f.args.vtable = obj.vtable;
 		} else {

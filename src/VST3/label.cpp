@@ -5,7 +5,6 @@
 #include "VST3/vst3.hpp"
 #include "VST3/finders.hpp"
 #include "common/analysis.hpp"
-#include "common/vtable.hpp"
 #include "util.hpp"
 
 void rv::vst3::label_factory() {
@@ -33,7 +32,7 @@ void rv::vst3::label_factory() {
 		return;
 	}
 
-	vtable_store_finder_t vfinder;
+	vtbl::store_finder_t vfinder;
 	vfinder.apply_to(&cfunc->body, nullptr);
 
 	bool is_direct = true;
@@ -56,7 +55,7 @@ void rv::vst3::label_factory() {
 				decompile(cand_pfn, &hf, DECOMP_NO_WAIT | DECOMP_NO_CACHE);
 			if (!cand_cfunc) continue;
 
-			vtable_store_finder_t cand_finder;
+			vtbl::store_finder_t cand_finder;
 			cand_finder.apply_to(&cand_cfunc->body, nullptr);
 
 			for (auto& h : cand_finder.hits) {
@@ -68,13 +67,22 @@ void rv::vst3::label_factory() {
 		}
 	}
 
-	for (auto& h : vfinder.hits) {
-		
-		if (h.this_offset) continue;
-			const char* type = pick_vtable_type(h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl", "IPluginFactory_vtbl" });
+	vtbl::model model;
+	const bool rtti = model.add_rtti_vtables() > 0;
+	if (rtti) rv_log("%u RTTI vtables", unsigned(model.vtables.size()));
 
-		if (type == nullptr || !label_vtable(h.vtable_ea, type)) {
-			rv_log("label_vtable failed at %a", h.vtable_ea);
+	for (auto& h : vfinder.hits) {
+
+		if (h.this_offset) continue;
+		const qstring type = vtbl::pick_type(h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl", "IPluginFactory_vtbl" });
+
+		const bool ok = !type.empty() && (rtti
+			? model.add(h.vtable_ea, type.c_str())
+			: vtbl::label(h.vtable_ea, type.c_str())
+		);
+
+		if (!ok) {
+			rv_log("Labelling vtable failed at %a", h.vtable_ea);
 			continue;
 		} else {
 			rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
@@ -113,6 +121,10 @@ void rv::vst3::label_factory() {
 		}
 	}
 
-	// TODO: locate the PClassInfo2 array from getClassInfo (factory vtable
-	// slot) instead of a per-sample hard-coded address
+	if (rtti) {
+		model.collect();
+		const vtbl::label_stats st = vtbl::apply(model);
+		rv_log("Vtable labels: %s", vtbl::format_stats(st).c_str());
+	}
+
 }

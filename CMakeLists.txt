@@ -40,8 +40,17 @@ set(PLUGIN_SOURCES
     src/common/analysis.cpp
     src/common/analysis.hpp
     src/common/stores.hpp
-    src/common/vtable.hpp
-    src/common/vtable.cpp
+
+    src/common/vtable/layout.hpp
+    src/common/vtable/layout.cpp
+    src/common/vtable/rtti.hpp
+    src/common/vtable/rtti.cpp
+    src/common/vtable/model.hpp
+    src/common/vtable/model.cpp
+    src/common/vtable/apply.hpp
+    src/common/vtable/apply.cpp
+    src/common/vtable/hexrays.hpp
+    src/common/vtable/hexrays.cpp
     src/common/dispatch.hpp
 )
 

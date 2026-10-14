@@ -195,11 +195,11 @@ ea_t find_vtable_from(ea_t fn_ea, int am_pos, int depth) {
 		if (c.pos > 0) {
 			// A derived ctor inlined around the call stores into the same
 			// local after it; otherwise the callee is the most derived ctor
-			ea_t vt = ctor_vtable(cf, c.arg0);
+			ea_t vt = vtbl::ctor_vtable(cf, c.arg0);
 			if (vt == BADADDR) {
 				cfuncptr_t cc = decompile_at(c.callee);
 				if (cc != nullptr && !cc->argidx.empty())
-					vt = ctor_vtable(cc, cc->argidx[0]);
+					vt = vtbl::ctor_vtable(cc, cc->argidx[0]);
 			}
 			if (vt != BADADDR) {
 				rv_log("Plugin ctor %a, vtable %a", c.callee, vt);
@@ -237,7 +237,7 @@ bool analyze_dispatcher(
 	out = {};
 	out.dispatcher = dispatcher_ea;
 	out.vtable = vtable;
-	if (vtable != BADADDR) out.class_name = rtti_class_name(vtable);
+	if (vtable != BADADDR) out.class_name = vtbl::class_name(vtable);
 
 	/*
 	dispatcher(effect, opcode, index, value, ptr, opt), object = effect->object

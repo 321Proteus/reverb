@@ -183,8 +183,7 @@ static bool load_aeffect_layout(
 
 /*
 	Most derived vtables of the object behind an AEffect. When the AEffect
-	initializer stores its own `this` as AEffect::object (SDK AudioEffect, JUCE
-	wrapper), it is a constructor and the classes built on top of it are the
+	initializer stores its own object as AEffect::object, it is a constructor and the classes built on top of it are the
 	plugin classes. Otherwise follow audioMaster from the entry point.
 */
 static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
@@ -196,7 +195,9 @@ static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 		cfuncptr_t cf = decompile_at(h.func);
 
 		if (cf != nullptr && !cf->argidx.empty() && cf->argidx[0] == h.root) {
-			std::vector<ea_t> v = most_derived_vtables(h.func);
+			std::vector<ea_t> v = vtbl::most_derived(h.func);
+			for (const ea_t vt : v)
+				rv_log("Most derived from ctor %a: vtable %a", h.func, vt);
 			if (!v.empty()) return v;
 		}
 	}
@@ -247,7 +248,7 @@ void scan() {
 		for (const ea_t vt : vtables) {
 			if (!done.insert({ disp, vt }).second) continue;
 			rv_log("Plugin object vtable %a (%s)", vt,
-				vt == BADADDR ? "none" : rtti_class_name(vt).c_str());
+				vt == BADADDR ? "none" : vtbl::class_name(vt).c_str());
 
 			dispatcher_info_t info;
 			if (analyze_dispatcher(disp, vt, object_off, info))
