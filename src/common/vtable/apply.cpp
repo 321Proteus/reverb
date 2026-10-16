@@ -12,7 +12,9 @@ tinfo_t find_class_type(const qstring& cls) {
 	tinfo_t t;
 	if (cls.empty()) return t;
 
-	auto usable = [](const tinfo_t& x) { return x.is_struct() && x.get_size() != BADSIZE; };
+	auto usable = [](const tinfo_t& x) {
+		return x.is_struct() && x.get_size() != BADSIZE;
+	};
 	if (t.get_named_type(nullptr, cls.c_str()) && usable(t)) return t;
 
 	// Unqualified fallback only when the short name is unambiguous
@@ -26,7 +28,8 @@ tinfo_t find_class_type(const qstring& cls) {
 		if (n != nullptr && vtbl::short_name(n) == s) matches++;
 	}
 
-	if (matches == 1 && t.get_named_type(nullptr, s.c_str()) && usable(t)) return t;
+	if (matches == 1 && t.get_named_type(nullptr, s.c_str()) && usable(t))
+		return t;
 	return tinfo_t();
 }
 
@@ -37,7 +40,9 @@ namespace rv::vtbl {
 static bool set_shared_cmt(ea_t f, int refs) {
 	qstring cmt, out, line;
 	line.sprnt("shared by %d vtable slots", refs);
-	get_func_cmt_ea(&cmt, f, true);
+	func_t* func = get_func(f);
+
+	get_func_cmt(&cmt, func, true);
 
 	size_t start = 0;
 	while (start <= cmt.length()) {
@@ -45,7 +50,8 @@ static bool set_shared_cmt(ea_t f, int refs) {
 		if (end == qstring::npos) end = cmt.length();
 
 		const qstring l = cmt.substr(start, end);
-		if (!l.empty() && !(l.starts_with("shared by ") && l.ends_with(" vtable slots"))) {
+		if (!l.empty() &&
+			!(l.starts_with("shared by ") && l.ends_with(" vtable slots"))) {
 			if (!out.empty()) out.append('\n');
 			out.append(l);
 		}
@@ -57,7 +63,8 @@ static bool set_shared_cmt(ea_t f, int refs) {
 	return out != cmt && set_func_cmt_ea(f, out.c_str(), true);
 }
 
-static tinfo_t slot_prototype(const slot_rec& s, const func_rec& fr, const label_policy& p) {
+static tinfo_t slot_prototype(
+	const slot_rec& s, const func_rec& fr, const label_policy& p) {
 	tinfo_t ft = s.type.is_ptr() ? s.type.get_pointed_object() : s.type;
 	if (!ft.is_func() || fr.kind == func_kind::THUNK) return ft;
 
@@ -95,18 +102,30 @@ label_stats apply(const model& m, const label_policy& p) {
 
 		del_items(r.ea, DELIT_EXPAND, r.iface_vtbl.get_size());
 		if (apply_tinfo(r.ea, r.iface_vtbl, TINFO_DEFINITE)) st.vtables++;
-		else failed.insert(r.ea);
+		else
+			failed.insert(r.ea);
 	}
 
 	for (const auto& [f, fr] : m.funcs) {
 
 		switch (fr.kind) {
-			case func_kind::PURECALL: 	st.purecall++; continue;
-			case func_kind::SKIP: 		st.skipped++; continue;
-			case func_kind::INHERITED: 	st.inherited++; break;
-			case func_kind::FOLDED: 	st.folded++; break;
-			case func_kind::THUNK: 		st.thunks++; break;
-			default: break;
+		case func_kind::PURECALL:
+			st.purecall++;
+			continue;
+		case func_kind::SKIP:
+			st.skipped++;
+			continue;
+		case func_kind::INHERITED:
+			st.inherited++;
+			break;
+		case func_kind::FOLDED:
+			st.folded++;
+			break;
+		case func_kind::THUNK:
+			st.thunks++;
+			break;
+		default:
+			break;
 		}
 
 		const slot_rec* s = fr.rec >= 0 ? &m.slots[fr.rec] : nullptr;
@@ -126,20 +145,24 @@ label_stats apply(const model& m, const label_policy& p) {
 			if (p.comment_shared) set_shared_cmt(f, fr.refs);
 			continue;
 		}
-		if (s == nullptr || fr.name.empty()) { // thunk without one owner and method
+		if (s == nullptr ||
+			fr.name.empty()) { // thunk without one owner and method
 			st.skipped++;
 			continue;
 		}
 
-		// Names are unique within the model; one taken outside it is not suffixed
+		// Names are unique within the model; one taken outside it is not
+		// suffixed
 		if (p.rename && has_dummy_name(get_flags(f))) {
 			if (set_name(f, fr.name.c_str(), SN_NOWARN)) st.named++;
-			else st.name_taken++;
+			else
+				st.name_taken++;
 		}
 
 		if (p.set_prototypes && !is_userti(f)) {
 			const tinfo_t ft = slot_prototype(*s, fr, p);
-			if (!ft.empty() && apply_tinfo(f, ft, TINFO_DEFINITE)) st.prototyped++;
+			if (!ft.empty() && apply_tinfo(f, ft, TINFO_DEFINITE))
+				st.prototyped++;
 		}
 	}
 
@@ -157,15 +180,16 @@ qstring format_stats(const label_stats& s) {
 
 bool label(ea_t vtbl_ea, const char* type_name) {
 	model m;
-	if (!m.add(vtbl_ea, type_name) || m.vtables.front().iface_vtbl.empty()) return false;
+	if (!m.add(vtbl_ea, type_name) || m.vtables.front().iface_vtbl.empty())
+		return false;
 
 	m.collect();
 	const label_stats st = apply(m);
 
 	// Typed by this or earlier
 	tinfo_t cur;
-	return st.vtables > 0 ||
-		   (get_tinfo(&cur, vtbl_ea) && cur.equals_to(m.vtables.front().iface_vtbl));
+	return st.vtables > 0 || (get_tinfo(&cur, vtbl_ea) &&
+								 cur.equals_to(m.vtables.front().iface_vtbl));
 }
 
 qstring pick_type(ea_t ea, std::initializer_list<const char*> candidates) {
