@@ -45,8 +45,6 @@ static ssize_t idaapi ui_event_cb(
 
 	rv_log("Database init complete - scanning");
 
-	rv::set_detected_framework(rv::scan_framework());
-
 	std::vector<qstring> exports;
 	ea_t main_ea = BADADDR;
 	int n = get_entry_qty();
@@ -79,6 +77,7 @@ static ssize_t idaapi ui_event_cb(
 	}
 
 	apply_interface(iface);
+	rv::set_detected_framework(rv::scan_framework());
 
 	if (auto_is_ok()) {
 		rv_log("Analysis already performed, scanning now");
