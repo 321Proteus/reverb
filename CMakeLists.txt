@@ -38,11 +38,12 @@ set(PLUGIN_SOURCES
     src/util.hpp
     src/state.cpp
 
-    src/common/format.cpp
-    src/common/format.hpp
     src/common/analysis.cpp
     src/common/analysis.hpp
+    src/common/format.cpp
+    src/common/format.hpp
     src/common/stores.hpp
+    src/common/framework.hpp
 
     src/common/vtable/layout.hpp
     src/common/vtable/layout.cpp
@@ -55,6 +56,8 @@ set(PLUGIN_SOURCES
     src/common/vtable/hexrays.hpp
     src/common/vtable/hexrays.cpp
     src/common/dispatch.hpp
+
+    src/frameworks/scan.cpp
 )
 
 set(RV_FORMAT_DIRS vst3 vst2)

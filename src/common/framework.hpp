@@ -1,14 +1,29 @@
 #pragma once
-#include "reverb.hpp"
 
+#include "reverb.hpp"
 namespace rv {
 
-typedef struct {
-	const char* types_decl;
-	void (*scan)();
-	void (*label)();
-} FrameworkModule;
+struct fw_signal_t {
+	Framework fw;
+	const char* pattern;
+	int weight;
+};
 
-const FrameworkModule* get_format_module(Interface iface);
+struct FrameworkModule {
+	const char* types_decl;
+	const fw_signal_t* signals;
+	int num_signals;
+
+	qstring (*detect_version)();
+	void (*label)(Interface iface);
+};
+
+struct FrameworkInfo {
+	Framework fw = Framework::OTHER;
+	qstring version;
+	int score = 0;
+};
+
+FrameworkInfo scan_framework();
 
 } // namespace rv

@@ -16,6 +16,7 @@
 #include "state.hpp"
 #include "types_embed.hpp"
 #include "util.hpp"
+#include "common/framework.hpp"
 
 static void apply_interface(rv::Interface iface) {
 
@@ -43,6 +44,8 @@ static ssize_t idaapi ui_event_cb(
 	if (notification_code != ui_database_inited) return 0;
 
 	rv_log("Database init complete - scanning");
+
+	rv::set_detected_framework(rv::scan_framework());
 
 	std::vector<qstring> exports;
 	ea_t main_ea = BADADDR;
