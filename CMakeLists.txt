@@ -63,7 +63,7 @@ set(PLUGIN_SOURCES
 set(RV_FORMAT_DIRS vst3 vst2)
 
 foreach(dir ${RV_FORMAT_DIRS})
-    file(GLOB FMT_SOURCES ONFIGURE_DEPENDS "src/formats/${dir}/*.cpp")
+    file(GLOB FMT_SOURCES CONFIGURE_DEPENDS "src/formats/${dir}/*.cpp")
     list(APPEND PLUGIN_SOURCES ${FMT_SOURCES})
 
     rv_embed_header(

@@ -1,7 +1,7 @@
 #pragma once
 #include "reverb.hpp"
-#include "VST2_types_embed.hpp"
-#include "VST3_types_embed.hpp"
+#include "vst2_types_embed.hpp"
+#include "vst3_types_embed.hpp"
 #include <ida.hpp>
 // #include "AAX_types_embed.hpp"
 // #include "CLAP_types_embed.hpp"
