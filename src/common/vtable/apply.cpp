@@ -60,7 +60,7 @@ static bool set_shared_cmt(ea_t f, int refs) {
 	if (!out.empty()) out.append('\n');
 	out.append(line);
 
-	return out != cmt && set_func_cmt_ea(f, out.c_str(), true);
+	return out != cmt && set_func_cmt(func, out.c_str(), true);
 }
 
 static tinfo_t slot_prototype(
