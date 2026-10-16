@@ -1,10 +1,12 @@
 #include "common/framework.hpp"
+#include "frameworks/dpf/dpf.hpp"
+#include "frameworks/iplug2/iplug2.hpp"
+#include "frameworks/juce/juce.hpp"
 #include "reverb.hpp"
 #include "util.hpp"
 #include <algorithm>
 #include <bytes.hpp>
 #include <map>
-#include <range.hpp>
 #include <segment.hpp>
 #include <vector>
 
@@ -15,18 +17,20 @@ struct signal_hit_t {
 	ea_t ea;
 };
 
-static const std::vector<fw_signal_t> signals = {
-	{Framework::DPF, "N7DISTRHO", 10},
-	{Framework::DPF, "@DISTRHO@@", 10},
-	{Framework::DPF, "DistrhoPluginInternal", 5},
-	{Framework::IPLUG2, "N5iplug", 10},
-	{Framework::IPLUG2, "@iplug@@", 10},
-	{Framework::JUCE, "N4juce", 10},
-	{Framework::JUCE, "@juce@@", 10},
-	{Framework::JUCE, "JUCE v", 5},
-};
-
 static constexpr int FW_THRESHOLD = 10;
+
+const FrameworkModule* get_framework_module(Framework fw) {
+	switch (fw) {
+	case Framework::JUCE:
+		return &juce::module;
+	case Framework::IPLUG2:
+		return &iplug2::module;
+	case Framework::DPF:
+		return &dpf::module;
+	default:
+		return nullptr;
+	}
+}
 
 static bool is_ok_seg(const segment_t* s) {
 	if (s->type == SEG_CODE || s->type == SEG_XTRN || s->type == SEG_BSS)
@@ -52,61 +56,46 @@ static bool compile(compiled_binpat_vec_t& out, const char* lit) {
 	return true;
 }
 
-static std::vector<signal_hit_t> find_fw_signals() {
+ea_t find_fw_string(const char* lit) {
+	compiled_binpat_vec_t bp;
+	if (!compile(bp, lit)) return BADADDR;
 
-	std::vector<signal_hit_t> hits;
-	rangevec_t ranges;
+	const int flags = BIN_SEARCH_FORWARD | BIN_SEARCH_CASE |
+					  BIN_SEARCH_NOBREAK | BIN_SEARCH_NOSHOW;
 
 	for (segment_t* s = get_first_seg(); s != nullptr;
 		s = get_next_seg(s->start_ea)) {
 
-		if (is_ok_seg(s)) ranges.push_back(range_t(s->start_ea, s->end_ea));
+		if (!is_ok_seg(s)) continue;
+
+		ea_t ea = bin_search(s->start_ea, s->end_ea, bp, flags);
+		if (ea != BADADDR) return ea;
 	}
 
-	for (const fw_signal_t& fwp : signals) {
-		compiled_binpat_vec_t bp;
-		if (!compile(bp, fwp.pattern)) continue;
+	return BADADDR;
+}
 
-		const int flags = BIN_SEARCH_FORWARD | BIN_SEARCH_CASE |
-						  BIN_SEARCH_NOBREAK | BIN_SEARCH_NOSHOW;
+static std::vector<signal_hit_t> find_fw_signals() {
 
-		for (const range_t& r : ranges) {
-			ea_t ea = bin_search(r.start_ea, r.end_ea, bp, flags);
+	std::vector<signal_hit_t> hits;
+
+	// OTHER is last and has no module
+	for (int i = 0; i < int(Framework::OTHER); i++) {
+		const FrameworkModule* mod = get_framework_module(Framework(i));
+		if (mod == nullptr) continue;
+
+		for (int j = 0; j < mod->num_signals; j++) {
+			const fw_signal_t& fwp = mod->signals[j];
+
+			ea_t ea = find_fw_string(fwp.pattern);
 			if (ea != BADADDR) {
 				rv_log("Framework pattern \"%s\" at %a", fwp.pattern, ea);
 				hits.push_back({&fwp, ea});
-				break;
 			}
 		}
 	}
 
 	return hits;
-}
-
-// SystemStats::getJUCEVersion() embeds "JUCE v<major>.<minor>.<build>"
-static qstring get_juce_version(const std::vector<signal_hit_t>& hits) {
-	for (const signal_hit_t& hit : hits) {
-		if (!streq(hit.sig->pattern, "JUCE v")) continue;
-
-		qstring s;
-		size_t len = get_max_strlit_length(hit.ea, STRTYPE_C, ALOPT_IGNHEADS);
-		if (get_strlit_contents(&s, hit.ea, len, STRTYPE_C) <= 0) continue;
-
-		s.remove(0, strlen("JUCE v"));
-		if (!s.empty() && qisdigit(s[0])) return s;
-	}
-
-	return {};
-}
-
-static qstring detect_version(
-	Framework fw, const std::vector<signal_hit_t>& hits) {
-	switch (fw) {
-	case Framework::JUCE:
-		return get_juce_version(hits);
-	default:
-		return {};
-	}
 }
 
 FrameworkInfo scan_framework() {
@@ -124,19 +113,30 @@ FrameworkInfo scan_framework() {
 	auto best = std::max_element(stat.begin(), stat.end(), by_score);
 
 	FrameworkInfo info;
-	if (best == stat.end() || best->second < FW_THRESHOLD) return info;
+	if (best == stat.end()) {
+		rv_log("No framework signals found (raw SDK or unknown framework)");
+		return info;
+	}
+
+	if (best->second < FW_THRESHOLD) {
+		rv_log("No framework detected, best match %s (score %d) is below %d",
+			get_framework_name(best->first), best->second, FW_THRESHOLD);
+		return info;
+	}
 
 	info.fw = best->first;
 	info.score = best->second;
-	info.version = detect_version(info.fw, hits);
+
+	const FrameworkModule* mod = get_framework_module(info.fw);
+	if (mod != nullptr && mod->detect_version != nullptr)
+		info.version = mod->detect_version();
 
 	rv_log("Detected %s %s(score %d)", get_framework_name(info.fw),
 		info.version.empty() ? "" : (info.version + " ").c_str(), info.score);
 
 	for (const auto& [fw, s] : stat)
 		if (fw != best->first && s >= FW_THRESHOLD)
-			rv_log("Also matched %s (score %d)", get_framework_name(fw),
-				s);
+			rv_log("Also matched %s (score %d)", get_framework_name(fw), s);
 
 	return info;
 }

@@ -25,5 +25,9 @@ struct FrameworkInfo {
 };
 
 FrameworkInfo scan_framework();
+const FrameworkModule* get_framework_module(Framework fw);
+
+// First hit of a literal in the searchable segments, BADADDR if none
+ea_t find_fw_string(const char* lit);
 
 } // namespace rv

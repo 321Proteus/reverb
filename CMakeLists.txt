@@ -73,6 +73,22 @@ foreach(dir ${RV_FORMAT_DIRS})
     )
 endforeach()
 
+set(RV_FRAMEWORK_DIRS juce iplug2 dpf)
+
+foreach(dir ${RV_FRAMEWORK_DIRS})
+    file(GLOB FW_SOURCES CONFIGURE_DEPENDS "src/frameworks/${dir}/*.cpp")
+    list(APPEND PLUGIN_SOURCES ${FW_SOURCES})
+
+    # Frameworks don't need type decls (for now)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.hpp)
+        rv_embed_header(
+            ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.hpp
+            RV_${dir}_TYPES_SRC
+            ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.hpp
+        )
+    endif()
+endforeach()
+
 ida_add_plugin(reverb SOURCES "${PLUGIN_SOURCES}")
 
 target_include_directories(reverb PRIVATE ${CMAKE_SOURCE_DIR}/src)
