@@ -5,7 +5,7 @@ namespace rv {
 enum class Interface { VST2, VST3, AU, AAX, CLAP, OTHER };
 enum class Framework { JUCE, IPLUG2, DPF, OTHER };
 
-inline qstring get_interface_name(Interface iface) {
+inline const char* get_interface_name(Interface iface) {
 	switch (iface) {
 	case Interface::VST2:
 		return "VST2";
@@ -17,14 +17,12 @@ inline qstring get_interface_name(Interface iface) {
 		return "AAX";
 	case Interface::CLAP:
 		return "CLAP";
-	case Interface::OTHER:
+	default:
 		return "Other";
 	}
-
-	return {};
 }
 
-inline qstring get_framework_name(Framework fw) {
+inline const char* get_framework_name(Framework fw) {
 	switch (fw) {
 	case Framework::JUCE:
 		return "JUCE";
@@ -32,11 +30,9 @@ inline qstring get_framework_name(Framework fw) {
 		return "iPlug2";
 	case Framework::DPF:
 		return "Distrho Plugin Framework";
-	case Framework::OTHER:
+	default:
 		return "Other or unknown framework";
 	}
-
-	return {};
 }
 
 } // namespace rv

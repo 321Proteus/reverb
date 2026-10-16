@@ -3,6 +3,7 @@
 #include "util.hpp"
 #include <algorithm>
 #include <bytes.hpp>
+#include <map>
 #include <range.hpp>
 #include <segment.hpp>
 #include <vector>
@@ -16,7 +17,7 @@ struct signal_hit_t {
 
 static const std::vector<fw_signal_t> signals = {
 	{Framework::DPF, "N7DISTRHO", 10},
-	{Framework::DPF, "@DISTRHO", 10},
+	{Framework::DPF, "@DISTRHO@@", 10},
 	{Framework::DPF, "DistrhoPluginInternal", 5},
 	{Framework::IPLUG2, "N5iplug", 10},
 	{Framework::IPLUG2, "@iplug@@", 10},
@@ -74,6 +75,7 @@ static std::vector<signal_hit_t> find_fw_signals() {
 			if (ea != BADADDR) {
 				rv_log("Framework pattern \"%s\" at %a", fwp.pattern, ea);
 				hits.push_back({&fwp, ea});
+				break;
 			}
 		}
 	}
@@ -128,12 +130,12 @@ FrameworkInfo scan_framework() {
 	info.score = best->second;
 	info.version = detect_version(info.fw, hits);
 
-	rv_log("Detected %s %s(score %d)", get_framework_name(info.fw).c_str(),
+	rv_log("Detected %s %s(score %d)", get_framework_name(info.fw),
 		info.version.empty() ? "" : (info.version + " ").c_str(), info.score);
 
 	for (const auto& [fw, s] : stat)
 		if (fw != best->first && s >= FW_THRESHOLD)
-			rv_log("Also matched %s (score %d)", get_framework_name(fw).c_str(),
+			rv_log("Also matched %s (score %d)", get_framework_name(fw),
 				s);
 
 	return info;
