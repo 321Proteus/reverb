@@ -23,8 +23,11 @@ project(reverb CXX)
 find_package(idasdk REQUIRED)
 
 function(rv_embed_header SRC_FILE VAR_NAME OUT_FILE)
+    string(TOUPPER "${VAR_NAME}" CASED_NAME)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SRC_FILE}")
     file(READ "${SRC_FILE}" CONTENTS)
-    file(WRITE "${OUT_FILE}" "static const char* ${VAR_NAME} = R\"RVSRC(\n${CONTENTS}\n)RVSRC\";\n")
+    file(WRITE "${OUT_FILE}" "static const char* ${CASED_NAME} = R\"RVSRC(\n${CONTENTS}\n)RVSRC\";\n")
+    message(STATUS "Generated ${VAR_NAME}")
 endfunction()
 
 set(PLUGIN_SOURCES
@@ -35,8 +38,8 @@ set(PLUGIN_SOURCES
     src/util.hpp
     src/state.cpp
 
-    src/common/module.cpp
-    src/common/module.hpp
+    src/common/format.cpp
+    src/common/format.hpp
     src/common/analysis.cpp
     src/common/analysis.hpp
     src/common/stores.hpp
@@ -54,14 +57,14 @@ set(PLUGIN_SOURCES
     src/common/dispatch.hpp
 )
 
-set(RV_FORMAT_DIRS VST3 VST2)
+set(RV_FORMAT_DIRS vst3 vst2)
 
 foreach(dir ${RV_FORMAT_DIRS})
-    file(GLOB FMT_SOURCES CMAKE_CONFIGURE_DEPENDS "src/${dir}/*.cpp")
+    file(GLOB FMT_SOURCES ONFIGURE_DEPENDS "src/formats/${dir}/*.cpp")
     list(APPEND PLUGIN_SOURCES ${FMT_SOURCES})
 
     rv_embed_header(
-        ${CMAKE_SOURCE_DIR}/src/${dir}/types.hpp
+        ${CMAKE_SOURCE_DIR}/src/formats/${dir}/types.hpp
         RV_${dir}_TYPES_SRC
         ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.hpp
     )

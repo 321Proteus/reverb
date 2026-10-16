@@ -2,21 +2,21 @@
 
 #include <pro.h>
 namespace rv {
-enum Interface { VST2, VST3, AU, AAX, CLAP, OTHER };
+enum class Interface { VST2, VST3, AU, AAX, CLAP, OTHER };
 
 inline qstring get_interface_name(Interface iface) {
 	switch (iface) {
-	case VST2:
+	case Interface::VST2:
 		return "VST2";
-	case VST3:
+	case Interface::VST3:
 		return "VST3";
-	case AU:
+	case Interface::AU:
 		return "AU";
-	case AAX:
+	case Interface::AAX:
 		return "AAX";
-	case CLAP:
+	case Interface::CLAP:
 		return "CLAP";
-	case OTHER:
+	case Interface::OTHER:
 		return "Other";
 	}
 

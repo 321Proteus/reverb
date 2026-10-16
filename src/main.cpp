@@ -1,5 +1,5 @@
 #include "common/analysis.hpp"
-#include "common/module.hpp"
+#include "common/format.hpp"
 #include "reverb.hpp"
 #include <auto.hpp>
 #include <cstdio>
@@ -64,13 +64,13 @@ static ssize_t idaapi ui_event_cb(
 
 	rv::Interface iface = classify_from_exports(exports);
 
-	if (iface == rv::OTHER && main_ea != BADADDR) {
+	if (iface == rv::Interface::OTHER && main_ea != BADADDR) {
 		rv_log("Ambiguous main export - analyzing on demand");
 		if (rv::ensure_func(main_ea) != nullptr && check_vst2_ep(main_ea))
-			iface = rv::VST2;
+			iface = rv::Interface::VST2;
 	}
 
-	if (iface == rv::OTHER) {
+	if (iface == rv::Interface::OTHER) {
 		rv_log("No supported plugin interface found, stopping");
 		return 0;
 	}

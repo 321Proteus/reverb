@@ -1,4 +1,4 @@
-#include "VST2/opcode.hpp"
+#include "opcode.hpp"
 #include "common/analysis.hpp"
 #include "common/vtable.hpp"
 #include "aeffect.hpp"

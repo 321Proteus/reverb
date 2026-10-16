@@ -81,17 +81,17 @@ rv::Interface classify_from_exports(const std::vector<qstring>& exports) {
 		switch (str_cth(lstrip(ex.c_str()))) {
 
 		case str_cth("VSTPluginMain"):
-			return rv::VST2;
+			return rv::Interface::VST2;
 		case str_cth("GetPluginFactory"):
-			return rv::VST3;
+			return rv::Interface::VST3;
 		case str_cth("ACFRegisterComponent"):
-			return rv::AAX;
+			return rv::Interface::AAX;
 		case str_cth("clap_entry"):
-			return rv::CLAP;
+			return rv::Interface::CLAP;
 		case str_cth("AUPluginInstanceEntry"):
-			return rv::AU;
+			return rv::Interface::AU;
 		}
 	}
 
-	return rv::OTHER;
+	return rv::Interface::OTHER;
 }

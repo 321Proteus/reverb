@@ -2,8 +2,8 @@
 #include <funcs.hpp>
 #include <hexrays.hpp>
 #include <name.hpp>
-#include "VST3/vst3.hpp"
-#include "VST3/finders.hpp"
+#include "vst3.hpp"
+#include "finders.hpp"
 #include "common/analysis.hpp"
 #include "util.hpp"
 
