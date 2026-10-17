@@ -32,6 +32,15 @@ bool looks_like(ea_t ea);
 */
 int slot_refs(ea_t func);
 
+// Slot target is __cxa_pure_virtual / _purecall, through one thunk hop
+bool is_pure_virtual(ea_t target);
+
+/*
+	Consecutive slots from address point vt, imports included. Unlike
+	extent, needs no xrefs, so it works before auto-analysis finishes
+*/
+int vtable_run_length(ea_t vt, int max_entries = 1024);
+
 // fn(const udm_t&, size_t byte_offset) for every slot of a _vtbl type, base
 // classes flattened
 template <class F>

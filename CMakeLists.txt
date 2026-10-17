@@ -47,8 +47,6 @@ set(PLUGIN_SOURCES
 
     src/common/vtable/layout.hpp
     src/common/vtable/layout.cpp
-    src/common/rtti/abi.hpp
-    src/common/rtti/abi.cpp
     src/common/vtable/model.hpp
     src/common/vtable/model.cpp
     src/common/vtable/apply.hpp
@@ -56,6 +54,16 @@ set(PLUGIN_SOURCES
     src/common/vtable/hexrays.hpp
     src/common/vtable/hexrays.cpp
     src/common/dispatch.hpp
+
+    src/common/refs.cpp
+    src/common/refs.hpp
+    src/common/rtti/abi.hpp
+    src/common/rtti/abi.cpp
+    src/common/rtti/detail.hpp
+    src/common/rtti/msvc.cpp
+    src/common/rtti/itanium.cpp
+    src/common/rtti/hierarchy.hpp
+    src/common/rtti/hierarchy.cpp
 
     src/frameworks/scan.cpp
 )

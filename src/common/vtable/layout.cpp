@@ -1,6 +1,9 @@
 #include "common/vtable/layout.hpp"
 #include "util.hpp"
 #include <bytes.hpp>
+#include <funcs.hpp>
+#include <name.hpp>
+#include <segment.hpp>
 #include <xref.hpp>
 
 namespace rv::vtbl {
@@ -40,6 +43,49 @@ int slot_refs(ea_t func) {
 			if (read_ptr(ref) == func) refs++;
 	}
 	return refs;
+}
+
+/*
+	Slot target is __cxa_pure_virtual (Itanium) or _purecall (MSVC). Follows
+	one thunk hop, since imports are usually reached through a stub, and the
+	IAT/GOT slot of the import keeps its name even in stripped binaries
+*/
+bool is_pure_virtual(ea_t target) {
+	for (int hop = 0; hop < 2 && target != BADADDR; hop++) {
+		const qstring n = get_name(target);
+		if (n.find("__cxa_pure_virtual") != qstring::npos ||
+			n.find("purecall") != qstring::npos)
+			return true;
+
+		func_t* f = get_func(target);
+		if (f == nullptr || (f->flags & FUNC_THUNK) == 0) break;
+
+		ea_t fptr = BADADDR;
+		const ea_t t = calc_thunk_func_target(f, &fptr);
+		target = (t != BADADDR)
+					 ? t
+					 : fptr; // indirect thunk: name of the import slot
+	}
+	return false;
+}
+
+// Number of consecutive slots from address point vt
+int vtable_run_length(ea_t vt, int max_entries) {
+	const int psz = ptr_size();
+	int n = 0;
+
+	for (; n < max_entries; n++) {
+		const ea_t slot = vt + n * psz;
+		if (!is_loaded(slot)) break;
+
+		const ea_t t = read_ptr(slot);
+		if (t == 0) break;
+
+		const segment_t* s = getseg(t);
+		const bool ext = s != nullptr && s->type == SEG_XTRN;
+		if (!ext && !in_exec_seg(t)) break;
+	}
+	return n;
 }
 
 } // namespace rv::vtbl

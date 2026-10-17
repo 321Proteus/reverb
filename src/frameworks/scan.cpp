@@ -1,4 +1,5 @@
 #include "common/framework.hpp"
+#include "common/refs.hpp"
 #include "frameworks/dpf/dpf.hpp"
 #include "frameworks/iplug2/iplug2.hpp"
 #include "frameworks/juce/juce.hpp"
@@ -32,16 +33,6 @@ const FrameworkModule* get_framework_module(Framework fw) {
 	}
 }
 
-static bool is_ok_seg(const segment_t* s) {
-	if (s->type == SEG_CODE || s->type == SEG_XTRN || s->type == SEG_BSS)
-		return false;
-	// Mach-O __TEXT data segs __const and __cstring inherit R|X perms, so
-	// perms are only important when the segment type says nothing
-	if (s->type == SEG_NORM && s->perm != 0)
-		return (s->perm & SEGPERM_EXEC) == 0;
-	return true;
-}
-
 static bool compile(compiled_binpat_vec_t& out, const char* lit) {
 	qstring text, err;
 	text.sprnt("\"%s\"", lit);
@@ -66,7 +57,7 @@ ea_t find_fw_string(const char* lit) {
 	for (segment_t* s = get_first_seg(); s != nullptr;
 		s = get_next_seg(s->start_ea)) {
 
-		if (!is_ok_seg(s)) continue;
+		if (!is_data_seg(s)) continue;
 
 		ea_t ea = bin_search(s->start_ea, s->end_ea, bp, flags);
 		if (ea != BADADDR) return ea;
