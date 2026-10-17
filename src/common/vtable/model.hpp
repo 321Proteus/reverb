@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/vtable/rtti.hpp"
+#include "common/rtti/abi.hpp"
 #include <map>
 #include <typeinf.hpp>
 #include <vector>
@@ -15,7 +15,7 @@ namespace rv::vtbl {
 struct table_rec {
 	ea_t ea = BADADDR;
 	size_t extent = 0;
-	class_info cls; // from RTTI, empty without
+	rtti::class_info cls; // from RTTI, empty without
 	qstring iface; // chosen generated interface, e.g. "IPlugView" ("" if none)
 	tinfo_t iface_vtbl; // "<iface>_vtbl"
 };
@@ -27,8 +27,8 @@ struct slot_rec {
 	qstring cls; // owning class, the interface name without RTTI
 	qstring iface;
 	qstring method;
-	sval_t sub_offset = 0; // of this in the class, after the thunk adjustment
-	tinfo_t type; // the _vtbl member, a function pointer
+	sval_t sub_offset = 0;	// of this in the class, after the thunk adjustment
+	tinfo_t type;			// the _vtbl member, a function pointer
 	bool via_thunk = false; // reached through an adjustor thunk in the slot
 };
 
@@ -48,7 +48,7 @@ struct func_rec {
 	// of this in owner
 	sval_t this_off = 0;
 
- 	// "owner::method", suffixed for thunks and aliases
+	// "owner::method", suffixed for thunks and aliases
 	qstring name;
 
 	// the thunk target
@@ -64,7 +64,7 @@ bool adjustor_thunk(ea_t ea, ea_t* target, sval_t* delta = nullptr);
 struct model {
 	std::vector<table_rec> vtables;
 	std::vector<slot_rec> slots;
-	std::map<qstring, class_info> classes; // by name
+	std::map<qstring, rtti::class_info> classes; // by name
 	std::map<ea_t, func_rec> funcs;
 
 	/*

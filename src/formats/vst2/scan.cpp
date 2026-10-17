@@ -248,7 +248,7 @@ void scan() {
 		for (const ea_t vt : vtables) {
 			if (!done.insert({ disp, vt }).second) continue;
 			rv_log("Plugin object vtable %a (%s)", vt,
-				vt == BADADDR ? "none" : vtbl::class_name(vt).c_str());
+				vt == BADADDR ? "none" : rtti::class_name(vt).c_str());
 
 			dispatcher_info_t info;
 			if (analyze_dispatcher(disp, vt, object_off, info))

@@ -237,7 +237,7 @@ bool analyze_dispatcher(
 	out = {};
 	out.dispatcher = dispatcher_ea;
 	out.vtable = vtable;
-	if (vtable != BADADDR) out.class_name = vtbl::class_name(vtable);
+	if (vtable != BADADDR) out.class_name = rtti::class_name(vtable);
 
 	/*
 	dispatcher(effect, opcode, index, value, ptr, opt), object = effect->object

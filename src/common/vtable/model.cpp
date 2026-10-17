@@ -118,7 +118,7 @@ bool model::add(
 		rec.extent = extent(vt);
 		if (rec.extent == 0) return false;
 
-		parse_rtti(vt, &rec.cls);
+		rtti::parse_rtti(vt, &rec.cls);
 		if (!rec.cls.name.empty()) classes.emplace(rec.cls.name, rec.cls);
 
 		index_[vt] = vtables.size();
@@ -144,8 +144,8 @@ bool model::add(
 	// Largest generated interface among the bases served by this vtable
 	qstring best;
 	size_t best_size = 0;
-	for (const qstring& b : bases_at(r->cls, r->cls.sub_offset)) {
-		const qstring s = short_name(b);
+	for (const qstring& b : rtti::bases_at(r->cls, r->cls.sub_offset)) {
+		const qstring s = rtti::short_name(b);
 		tinfo_t t;
 		if (vtbl_type(s, t) && fits(t, r->extent) && t.get_size() > best_size) {
 			best = s;
@@ -154,7 +154,7 @@ bool model::add(
 	}
 
 	// Abstract interface vtables hold pure virtual stubs only
-	if (!best.empty() && best == short_name(r->cls.name)) return true;
+	if (!best.empty() && best == rtti::short_name(r->cls.name)) return true;
 
 	if (best.empty()) {
 		for (const char* c : fallback) {
@@ -176,8 +176,8 @@ size_t model::add_rtti_vtables() {
 	size_t n = 0;
 
 	auto add_rtti = [&](ea_t vt) {
-		class_info ci;
-		if (!parse_rtti(vt, &ci) || !add(vt)) return false;
+		rtti::class_info ci;
+		if (!rtti::parse_rtti(vt, &ci) || !add(vt)) return false;
 		n++;
 		return true;
 	};
@@ -216,7 +216,7 @@ bool model::is_base_of(const qstring& base, const qstring& derived) const {
 	auto it = classes.find(derived);
 	if (it == classes.end()) return false;
 
-	for (const base_info& b : it->second.bases)
+	for (const rtti::base_info& b : it->second.bases)
 		if (b.name == base) return true;
 	return false;
 }
@@ -315,7 +315,7 @@ bool model::resolve_owner(const std::vector<int>& recs, func_rec& fr) const {
 		std::vector<qstring> at;
 		for (int i : recs) {
 			if (slots[i].cls != o) continue;
-			for (const qstring& b : bases_at(c->second, slots[i].sub_offset))
+			for (const qstring& b : rtti::bases_at(c->second, slots[i].sub_offset))
 				if (std::find(at.begin(), at.end(), b) == at.end()) at.push_back(b);
 		}
 

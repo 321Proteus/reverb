@@ -1,4 +1,4 @@
-#include "common/vtable/rtti.hpp"
+#include "common/rtti/abi.hpp"
 #include "common/stores.hpp"
 #include "util.hpp"
 #include <bytes.hpp>
@@ -6,7 +6,7 @@
 #include <name.hpp>
 #include <nalt.hpp>
 
-namespace rv::vtbl {
+namespace rv::rtti {
 
 constexpr size_t MAX_NAME = 512;
 constexpr uint32 MAX_BASES = 128;
@@ -45,7 +45,7 @@ static ea_t msvc_ptr(ea_t field, bool rva) {
 	return is_loaded(ea) ? ea : BADADDR;
 }
 
-// TypeDescriptor name ".?AVFoo@@" -> "Foo"
+// demangled TypeDescriptor name
 static qstring msvc_type_name(ea_t td) {
 	qstring raw;
 	if (td == BADADDR || !read_cstr(td + 2 * ptr_size(), raw, MAX_NAME) ||
@@ -112,7 +112,7 @@ static bool parse_msvc(ea_t vt, class_info* out) {
 
 // ---- Itanium ----
 
-// Typeinfo name "N9Steinberg14CPluginFactoryE" -> "Steinberg::CPluginFactory"
+// Demangled typeinfo name
 static qstring itanium_type_name(ea_t ti) {
 	if (!is_loaded(ti)) return qstring();
 	const ea_t p = read_ptr(ti + ptr_size());
@@ -149,9 +149,9 @@ static bool valid_vmi(ea_t ti) {
 
 static ti_kind_t ti_kind(ea_t ti) {
 	/*
-		The vptr is the address point of a __cxxabiv1 vtable, two words past its
+		The vptr is the address point of a __cxxabiv1 vtable, after its
 		_ZTV symbol. The address point itself is never checked: in an extern
-		segment it belongs to whatever import comes next.
+		segment it belongs to whatever import comes next
 	*/
 	const qstring n = get_name(read_ptr(ti) - 2 * ptr_size());
 	if (n.find("__vmi_class_type_info") != qstring::npos) return TI_VMI;
@@ -236,4 +236,4 @@ qstring class_name(ea_t vt) {
 	return parse_rtti(vt, &ci) ? ci.name : qstring();
 }
 
-} // namespace rv::vtbl
+} // namespace rv::rtti

@@ -47,8 +47,8 @@ set(PLUGIN_SOURCES
 
     src/common/vtable/layout.hpp
     src/common/vtable/layout.cpp
-    src/common/vtable/rtti.hpp
-    src/common/vtable/rtti.cpp
+    src/common/rtti/abi.hpp
+    src/common/rtti/abi.cpp
     src/common/vtable/model.hpp
     src/common/vtable/model.cpp
     src/common/vtable/apply.hpp

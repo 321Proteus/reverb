@@ -18,14 +18,14 @@ tinfo_t find_class_type(const qstring& cls) {
 	if (t.get_named_type(nullptr, cls.c_str()) && usable(t)) return t;
 
 	// Unqualified fallback only when the short name is unambiguous
-	const qstring s = vtbl::short_name(cls);
+	const qstring s = rtti::short_name(cls);
 	if (s == cls) return tinfo_t();
 
 	int matches = 0;
 	const uint32 lim = get_ordinal_limit();
 	for (uint32 ord = 1; ord < lim && matches < 2; ord++) {
 		const char* n = get_numbered_type_name(nullptr, ord);
-		if (n != nullptr && vtbl::short_name(n) == s) matches++;
+		if (n != nullptr && rtti::short_name(n) == s) matches++;
 	}
 
 	if (matches == 1 && t.get_named_type(nullptr, s.c_str()) && usable(t))
