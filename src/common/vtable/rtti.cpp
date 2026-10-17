@@ -14,7 +14,8 @@ constexpr int MAX_DEPTH = 16;
 
 // Pointer-sized signed value (offset-to-top, offset_flags)
 static sval_t read_sptr(ea_t ea) {
-	return ptr_size() == 8 ? sval_t(int64(get_qword(ea))) : sval_t(int32(get_dword(ea)));
+	return ptr_size() == 8 ? sval_t(int64(get_qword(ea)))
+						   : sval_t(int32(get_dword(ea)));
 }
 
 qstring short_name(const qstring& name) {
@@ -23,8 +24,10 @@ qstring short_name(const qstring& name) {
 	for (size_t i = 0; i < name.length(); i++) {
 		const char c = name[i];
 		if (c == '<') depth++;
-		else if (c == '>') depth--;
-		else if (c == ':' && depth == 0 && i + 1 < name.length() && name[i + 1] == ':') {
+		else if (c == '>')
+			depth--;
+		else if (c == ':' && depth == 0 && i + 1 < name.length() &&
+				 name[i + 1] == ':') {
 			start = i + 2;
 			i++;
 		}
@@ -51,12 +54,14 @@ static qstring msvc_type_name(ea_t td) {
 
 	qstring dem;
 	const qstring mangled = qstring("??_R0") + raw.substr(1) + "@8";
-	if (demangle_name(&dem, mangled.c_str(), MNG_SHORT_FORM) <= 0) return qstring();
+	if (demangle_name(&dem, mangled.c_str(), MNG_SHORT_FORM) <= 0)
+		return qstring();
 
 	const size_t p = dem.find(" `RTTI");
 	if (p != qstring::npos) dem.resize(p);
 	if (dem.starts_with("class ")) dem.remove(0, 6);
-	else if (dem.starts_with("struct ")) dem.remove(0, 7);
+	else if (dem.starts_with("struct "))
+		dem.remove(0, 7);
 	return dem;
 }
 
@@ -69,7 +74,8 @@ static bool parse_msvc(ea_t vt, class_info* out) {
 	const bool rva = psz == 8;
 
 	// x64: signature 1 and pSelf pointing back at the locator
-	if (rva && (sig != 1 || get_imagebase() + get_dword(col + 20) != col)) return false;
+	if (rva && (sig != 1 || get_imagebase() + get_dword(col + 20) != col))
+		return false;
 	if (!rva && sig != 0) return false;
 
 	const ea_t td = msvc_ptr(col + 12, rva);
@@ -97,7 +103,7 @@ static bool parse_msvc(ea_t vt, class_info* out) {
 		b.name = msvc_type_name(msvc_ptr(bcd, rva));
 		if (b.name.empty()) continue;
 
-		b.offset = sval_t(int32(get_dword(bcd + 8))); // mdisp
+		b.offset = sval_t(int32(get_dword(bcd + 8)));	 // mdisp
 		b.is_virtual = int32(get_dword(bcd + 12)) != -1; // pdisp
 		out->bases.push_back(b);
 	}
@@ -112,12 +118,16 @@ static qstring itanium_type_name(ea_t ti) {
 	const ea_t p = read_ptr(ti + ptr_size());
 
 	qstring raw;
-	if (!is_loaded(p) || !read_cstr(p, raw, MAX_NAME) || raw.empty()) return qstring();
-	if (!qisdigit(raw[0]) && raw[0] != 'N' && raw[0] != 'S') return qstring();
+	if (!is_loaded(p) || !read_cstr(p, raw, MAX_NAME) || raw.empty())
+		return qstring();
+	if (raw[0] == '*') raw.remove(0, 1);
+	if (!qisdigit(raw[0]) && raw[0] != 'N' && raw[0] != 'S' && raw[0] != 'Z')
+		return qstring();
 
 	qstring dem;
 	const qstring mangled = qstring("_Z") + raw;
-	if (demangle_name(&dem, mangled.c_str(), MNG_SHORT_FORM) <= 0) return qstring();
+	if (demangle_name(&dem, mangled.c_str(), MNG_SHORT_FORM) <= 0)
+		return qstring();
 	return dem;
 }
 
@@ -131,7 +141,8 @@ static bool valid_vmi(ea_t ti) {
 	if (n == 0 || n > MAX_BASES) return false;
 
 	for (uint32 i = 0; i < n; i++)
-		if (itanium_type_name(read_ptr(vmi_bases(ti) + i * 2 * ptr_size())).empty())
+		if (itanium_type_name(read_ptr(vmi_bases(ti) + i * 2 * ptr_size()))
+				.empty())
 			return false;
 	return true;
 }
@@ -152,7 +163,8 @@ static ti_kind_t ti_kind(ea_t ti) {
 	return TI_PLAIN;
 }
 
-static void itanium_bases(ea_t ti, sval_t off, bool virt, int depth, qvector<base_info>& out) {
+static void itanium_bases(
+	ea_t ti, sval_t off, bool virt, int depth, qvector<base_info>& out) {
 	if (depth > MAX_DEPTH || out.size() >= MAX_BASES) return;
 
 	auto add = [&](ea_t bti, sval_t boff, bool bvirt) {
