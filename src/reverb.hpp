@@ -2,7 +2,25 @@
 
 #include <pro.h>
 namespace rv {
-enum class Interface { VST2, VST3, AU, AAX, CLAP, OTHER };
+enum class Interface { VST2, VST3, AU, AAX, CLAP, _COUNT };
+
+class InterfaceSet {
+public:
+	void add(Interface i) { value_ |= bit(i); }
+	void remove(Interface i) { value_ &= ~bit(i); }
+	bool has(Interface i) const { return (value_ & bit(i)) != 0; }
+	bool empty() const { return value_ == 0; }
+
+	template <class F> void for_each(F&& fn) const {
+		for (int i = 0; i < int(Interface::_COUNT); i++)
+			if (value_ & (1u << i)) fn(Interface(i));
+	}
+
+private:
+	static constexpr uint32 bit(Interface i) { return 1u << unsigned(i); }
+	uint32 value_ = 0;
+};
+
 enum class Framework { JUCE, IPLUG2, DPF, OTHER };
 
 inline const char* get_interface_name(Interface iface) {

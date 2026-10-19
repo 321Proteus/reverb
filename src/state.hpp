@@ -3,8 +3,8 @@
 #include "common/framework.hpp"
 
 namespace rv {
-Interface get_detected_interface();
-void set_detected_interface(Interface iface);
+InterfaceSet get_detected_interfaces();
+void set_detected_interfaces(InterfaceSet is);
 
 FrameworkInfo get_detected_framework();
 void set_detected_framework(FrameworkInfo info);

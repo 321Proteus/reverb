@@ -4,7 +4,6 @@
 #include "formats/vst3/vst3.hpp"
 #include "vst3_types_embed.hpp"
 #include "reverb.hpp"
-#include "util.hpp"
 
 namespace rv {
 

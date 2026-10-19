@@ -75,23 +75,30 @@ bool check_vst2_ep(ea_t ea) {
 
 static const char* lstrip(const char* s) { return (s[0] == '_') ? s + 1 : s; }
 
-rv::Interface classify_from_exports(const std::vector<qstring>& exports) {
+rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
+
+	rv::InterfaceSet found;
 
 	for (const qstring& ex : exports) {
 		switch (str_cth(lstrip(ex.c_str()))) {
 
 		case str_cth("VSTPluginMain"):
-			return rv::Interface::VST2;
+			found.add(rv::Interface::VST2);
+			break;
 		case str_cth("GetPluginFactory"):
-			return rv::Interface::VST3;
+			found.add(rv::Interface::VST3);
+			break;
 		case str_cth("ACFRegisterComponent"):
-			return rv::Interface::AAX;
+			found.add(rv::Interface::AAX);
+			break;
 		case str_cth("clap_entry"):
-			return rv::Interface::CLAP;
+			found.add(rv::Interface::CLAP);
+			break;
 		case str_cth("AUPluginInstanceEntry"):
-			return rv::Interface::AU;
+			found.add(rv::Interface::AU);
+			break;
 		}
 	}
 
-	return rv::Interface::OTHER;
+	return found;
 }

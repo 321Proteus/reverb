@@ -1,4 +1,3 @@
-#include "common/analysis.hpp"
 #include "common/format.hpp"
 #include "reverb.hpp"
 #include <auto.hpp>
@@ -18,25 +17,31 @@
 #include "util.hpp"
 #include "common/framework.hpp"
 
-static void apply_interface(rv::Interface iface) {
+static void apply_interfaces(rv::InterfaceSet is) {
 
-	rv::set_detected_interface(iface);
-	qstring name = rv::get_interface_name(iface);
-	rv_log("Plugin interface %s detected", name.c_str());
+	rv::set_detected_interfaces(is);
 
-	const char* decl_src = rv::get_types_decl(iface);
-	if (decl_src == nullptr)
-		rv_log("No type declarations compiled in for %s", name.c_str());
-	else
-		parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+	is.for_each([&](rv::Interface iface) {
+		qstring name = rv::get_interface_name(iface);
+		rv_log("Plugin interface %s detected", name.c_str());
+
+		const char* decl_src = rv::get_types_decl(iface);
+		if (decl_src == nullptr)
+			rv_log("No type declarations compiled in for %s", name.c_str());
+		else
+			parse_decls(
+				nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+	});
 }
 
-static void run_scan(rv::Interface iface) {
+static void run_scan(rv::InterfaceSet is) {
+	is.for_each([](const rv::Interface iface) {
+		const rv::FormatModule* mod = rv::get_format_module(iface);
+		if (!mod) return;
 
-	const rv::FormatModule* mod = rv::get_format_module(iface);
-	if (!mod) return;
-	if (mod->scan != nullptr) mod->scan();
-	if (mod->label != nullptr) mod->label();
+		if (mod->scan != nullptr) mod->scan();
+		if (mod->label != nullptr) mod->label();
+	});
 }
 
 static ssize_t idaapi ui_event_cb(
@@ -58,30 +63,26 @@ static ssize_t idaapi ui_event_cb(
 		get_entry_name(&name, ord);
 		if (name == "main") main_ea = ea;
 		exports.push_back(name);
-
-		// rv_log("Index: %llu, Ordinal: %llu, Address: %a, Name: %s", i,
-		// ord, ea, name.c_str());
 	}
 
-	rv::Interface iface = classify_from_exports(exports);
+	rv::InterfaceSet formats = classify_from_exports(exports);
 
-	if (iface == rv::Interface::OTHER && main_ea != BADADDR) {
-		rv_log("Ambiguous main export - analyzing on demand");
-		if (rv::ensure_func(main_ea) != nullptr && check_vst2_ep(main_ea))
-			iface = rv::Interface::VST2;
+	if (formats.empty() && main_ea != BADADDR) {
+		rv_log("Ambiguous main export, probing for VST2");
+		if (check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
 	}
 
-	if (iface == rv::Interface::OTHER) {
+	if (formats.empty()) {
 		rv_log("No supported plugin interface found, stopping");
 		return 0;
 	}
 
-	apply_interface(iface);
+	apply_interfaces(formats);
 	rv::set_detected_framework(rv::scan_framework());
 
 	if (auto_is_ok()) {
 		rv_log("Analysis already performed, scanning now");
-		run_scan(iface);
+		run_scan(formats);
 	} else {
 		rv_log("The metadata scan will run once the IDA "
 			   "analysis is finished. You can start browsing the file now.");
@@ -95,7 +96,7 @@ static ssize_t idaapi idb_event_cb(
 
 	if (notification_code != idb_event::auto_empty_finally) return 0;
 
-	run_scan(rv::get_detected_interface());
+	run_scan(rv::get_detected_interfaces());
 
 	return 0;
 }
@@ -103,6 +104,11 @@ static ssize_t idaapi idb_event_cb(
 static plugmod_t* idaapi init(void) {
 	if (!init_hexrays_plugin()) {
 		rv_log("Failed to initialize Hex-Rays plugin, skipping");
+		return PLUGIN_SKIP;
+	}
+
+	if (!inf_is_dll()) {
+		rv_log("The program is not an executable, skipping");
 		return PLUGIN_SKIP;
 	}
 

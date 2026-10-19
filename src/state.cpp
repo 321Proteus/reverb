@@ -2,11 +2,11 @@
 #include "reverb.hpp"
 
 namespace rv {
-static Interface g_iface = Interface::OTHER;
+static InterfaceSet g_iface_set = InterfaceSet();
 static FrameworkInfo g_framework;
 
-Interface get_detected_interface() { return g_iface; }
-void set_detected_interface(Interface iface) { g_iface = iface; }
+InterfaceSet get_detected_interfaces() { return g_iface_set; }
+void set_detected_interfaces(InterfaceSet is) { g_iface_set = is; }
 
 FrameworkInfo get_detected_framework() { return g_framework; }
 void set_detected_framework(FrameworkInfo info) { g_framework = info; }
