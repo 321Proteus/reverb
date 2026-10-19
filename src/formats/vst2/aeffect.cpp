@@ -135,8 +135,7 @@ bool type_exists(const char* name) {
 	return t.get_named_type(get_idati(), name);
 }
 
-// Callback prototypes from aeffect.h. Uses the SDK typedefs when your VST2
-// types.hpp defines them, otherwise equivalent plain types.
+// Callback prototypes from aeffect.h
 qstring proto_for(const char* field) {
 	const bool is64 = inf_is_64bit();
 	const char* ip =

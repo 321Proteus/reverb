@@ -142,15 +142,14 @@ static bool load_aeffect_layout(
 	std::vector<aeffect_field_t>& out, int& total_size) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), "AEffect") || !t.is_struct()) {
-		rv_log("AEffect type not found in local types - was types.hpp parsed?");
+		rv_log("AEffect type not found in local types - was types.h parsed?");
 		return false;
 	}
 
 	size_t sz = t.get_size();
 	const int expected = inf_is_64bit() ? 192 : 144;
 	if (sz == BADSIZE || int(sz) != expected) {
-		rv_log(
-			"AEffect is %d bytes, expected %d - check types.hpp declarations",
+		rv_log("AEffect is %d bytes, expected %d - check types.h declarations",
 			sz == BADSIZE ? -1 : int(sz), expected);
 		return false;
 	}
@@ -162,7 +161,7 @@ static bool load_aeffect_layout(
 		udm.name = name;
 
 		if (t.find_udm(&udm, STRMEM_NAME) < 0) {
-			rv_log("AEffect::%s missing from types.hpp, skipping", name);
+			rv_log("AEffect::%s missing from types.h, skipping", name);
 			continue;
 		}
 
@@ -183,8 +182,9 @@ static bool load_aeffect_layout(
 
 /*
 	Most derived vtables of the object behind an AEffect. When the AEffect
-	initializer stores its own object as AEffect::object, it is a constructor and the classes built on top of it are the
-	plugin classes. Otherwise follow audioMaster from the entry point.
+	initializer stores its own object as AEffect::object, it is a constructor
+   and the classes built on top of it are the plugin classes. Otherwise follow
+   audioMaster from the entry point.
 */
 static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 	auto o = h.fields.find("object");

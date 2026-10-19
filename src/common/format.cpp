@@ -1,8 +1,8 @@
 #include "format.hpp"
 #include "formats/vst2/vst2.hpp"
-#include "vst2_types_embed.hpp"
+#include "vst2_types_embed.h"
 #include "formats/vst3/vst3.hpp"
-#include "vst3_types_embed.hpp"
+#include "vst3_types_embed.h"
 #include "reverb.hpp"
 
 namespace rv {

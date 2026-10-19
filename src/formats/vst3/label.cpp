@@ -7,6 +7,18 @@
 #include "common/analysis.hpp"
 #include "util.hpp"
 
+static bool may_be_factory(ea_t vt) {
+	rv::rtti::class_info ci;
+	if (!rv::rtti::parse_rtti(vt, &ci)) return true;
+
+	for (const qstring& b : rv::rtti::bases_at(ci, ci.sub_offset))
+		if (rv::rtti::short_name(b).starts_with("IPluginFactory")) return true;
+
+	rv_log(
+		"Skipping %s vtable at %a: not an IPluginFactory", ci.name.c_str(), vt);
+	return false;
+}
+
 void rv::vst3::label_factory() {
 	ea_t gpf_ea = get_name_ea(BADADDR, "GetPluginFactory");
 	if (gpf_ea == BADADDR) {
@@ -73,13 +85,14 @@ void rv::vst3::label_factory() {
 
 	for (auto& h : vfinder.hits) {
 
-		if (h.this_offset) continue;
-		const qstring type = vtbl::pick_type(h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl", "IPluginFactory_vtbl" });
+		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
+		const qstring type = vtbl::pick_type(
+			h.vtable_ea, {"IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
+							 "IPluginFactory_vtbl"});
 
-		const bool ok = !type.empty() && (rtti
-			? model.add(h.vtable_ea, type.c_str())
-			: vtbl::label(h.vtable_ea, type.c_str())
-		);
+		const bool ok =
+			!type.empty() && (rtti ? model.add(h.vtable_ea, type.c_str())
+								   : vtbl::label(h.vtable_ea, type.c_str()));
 
 		if (!ok) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
@@ -126,5 +139,4 @@ void rv::vst3::label_factory() {
 		const vtbl::label_stats st = vtbl::apply(model);
 		rv_log("Vtable labels: %s", vtbl::format_stats(st).c_str());
 	}
-
 }

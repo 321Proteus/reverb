@@ -75,9 +75,9 @@ foreach(dir ${RV_FORMAT_DIRS})
     list(APPEND PLUGIN_SOURCES ${FMT_SOURCES})
 
     rv_embed_header(
-        ${CMAKE_SOURCE_DIR}/src/formats/${dir}/types.hpp
+        ${CMAKE_SOURCE_DIR}/src/formats/${dir}/types.h
         RV_${dir}_TYPES_SRC
-        ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.hpp
+        ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.h
     )
 endforeach()
 
@@ -88,11 +88,11 @@ foreach(dir ${RV_FRAMEWORK_DIRS})
     list(APPEND PLUGIN_SOURCES ${FW_SOURCES})
 
     # Frameworks don't need type decls (for now)
-    if(EXISTS ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.hpp)
+    if(EXISTS ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.h)
         rv_embed_header(
-            ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.hpp
+            ${CMAKE_SOURCE_DIR}/src/frameworks/${dir}/types.h
             RV_${dir}_TYPES_SRC
-            ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.hpp
+            ${CMAKE_BINARY_DIR}/generated/${dir}_types_embed.h
         )
     endif()
 endforeach()
