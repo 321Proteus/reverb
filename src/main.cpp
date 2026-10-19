@@ -16,21 +16,29 @@
 #include "types_embed.hpp"
 #include "util.hpp"
 #include "common/framework.hpp"
+#include "formats/vst2/vst2.hpp"
+
+// A format probe may have loaded the types before detection ends
+static void load_types(rv::Interface iface) {
+	if (rv::get_loaded_types().has(iface)) return;
+
+	const char* decl_src = rv::get_types_decl(iface);
+	if (decl_src == nullptr) {
+		rv_log("No type declarations compiled in for %s",
+			rv::get_interface_name(iface));
+		return;
+	}
+	parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+	rv::mark_types_loaded(iface);
+}
 
 static void apply_interfaces(rv::InterfaceSet is) {
 
 	rv::set_detected_interfaces(is);
 
-	is.for_each([&](rv::Interface iface) {
-		qstring name = rv::get_interface_name(iface);
-		rv_log("Plugin interface %s detected", name.c_str());
-
-		const char* decl_src = rv::get_types_decl(iface);
-		if (decl_src == nullptr)
-			rv_log("No type declarations compiled in for %s", name.c_str());
-		else
-			parse_decls(
-				nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+	is.for_each([](rv::Interface iface) {
+		rv_log("Plugin interface %s detected", rv::get_interface_name(iface));
+		load_types(iface);
 	});
 }
 
@@ -51,7 +59,6 @@ static ssize_t idaapi ui_event_cb(
 	rv_log("Database init complete - scanning");
 
 	std::vector<qstring> exports;
-	ea_t main_ea = BADADDR;
 	int n = get_entry_qty();
 
 	for (int i = 0; i < n; i++) {
@@ -61,15 +68,16 @@ static ssize_t idaapi ui_event_cb(
 		qstring name;
 
 		get_entry_name(&name, ord);
-		if (name == "main") main_ea = ea;
 		exports.push_back(name);
 	}
 
 	rv::InterfaceSet formats = classify_from_exports(exports);
+	ea_t main_ea = get_name_ea(BADADDR, "main");
 
 	if (formats.empty() && main_ea != BADADDR) {
 		rv_log("Ambiguous main export, probing for VST2");
-		if (check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
+		load_types(rv::Interface::VST2);
+		if (rv::vst2::check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
 	}
 
 	if (formats.empty()) {
