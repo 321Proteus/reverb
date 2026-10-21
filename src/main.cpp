@@ -80,20 +80,21 @@ static ssize_t idaapi ui_event_cb(
 		if (rv::vst2::check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
 	}
 
-	if (formats.empty()) {
-		rv_log("No supported plugin interface found, stopping");
-		return 0;
-	}
-
 	apply_interfaces(formats);
 	rv::set_detected_framework(rv::scan_framework());
 
-	if (auto_is_ok()) {
-		rv_log("Analysis already performed, scanning now");
-		run_scan(formats);
+	if (formats.empty()) {
+		rv_log("No supported plugin interface found, stopping");
+		return 0;
 	} else {
-		rv_log("The metadata scan will run once the IDA "
-			   "analysis is finished. You can start browsing the file now.");
+		if (auto_is_ok()) {
+			rv_log("Analysis already performed, scanning now");
+			run_scan(formats);
+		} else {
+			rv_log(
+				"The metadata scan will run once the IDA "
+				"analysis is finished. You can start browsing the file now.");
+		}
 	}
 
 	return 0;
