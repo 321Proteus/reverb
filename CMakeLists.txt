@@ -68,7 +68,7 @@ set(PLUGIN_SOURCES
     src/frameworks/scan.cpp
 )
 
-set(RV_FORMAT_DIRS vst3 vst2)
+set(RV_FORMAT_DIRS vst3 vst2 clap)
 
 foreach(dir ${RV_FORMAT_DIRS})
     file(GLOB FMT_SOURCES CONFIGURE_DEPENDS "src/formats/${dir}/*.cpp")
