@@ -7,7 +7,7 @@ outputs. The plugin build only embeds the generated files.
 
     pip install libclang
     git clone https://github.com/steinbergmedia/vst3_pluginterfaces pluginterfaces
-    python3 tools/gen_vst3_types.py --sdk . \
+    python3 tools/vst3_types.py --sdk . \
         --types src/VST3/types.hpp --iids src/VST3/iids.inc
 
 --sdk is the directory that *contains* pluginterfaces/ (the SDK's own include
@@ -28,9 +28,7 @@ struct's size and field offsets are compared against the real SDK headers.
 The script fails if anything differs.
 """
 
-import argparse
 import re
-import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -39,7 +37,12 @@ import clang.cindex as ci
 from clang.cindex import CursorKind as CK
 from clang.cindex import TypeKind as TK
 
+import declgen
+from declgen import (BUILTIN, TARGETS, GenError, TypeRenderer, anon_record,
+                     fail, field_layout, kw, with_const)
+
 HERE = Path(__file__).resolve().parent
+SCRIPT = "gen_vst3_types.py"  # name recorded in the committed outputs
 SHIMS = HERE / "vst3_shims"
 
 # Utility headers with C++ helpers (strings, smart pointers, templates) and
@@ -50,81 +53,30 @@ EXCLUDE = {
     "futils.h",
 }
 
-# ABIs we verify against. Windows uses COM_COMPATIBLE; the others don't.
-TARGETS = {
-    "x86_64-w64-mingw32": "win64",
-    "i686-w64-mingw32": "win32",
-    "x86_64-linux-gnu": "linux64",
-    "arm64-apple-darwin": "mac64",
-}
+# Windows uses COM_COMPATIBLE; the other TARGETS don't.
 PRIMARY = "x86_64-w64-mingw32"
 
 NAMESPACES = {"Steinberg"}  # and everything nested in it
 
-BUILTIN = {
-    TK.VOID: "void", TK.BOOL: "bool",
-    TK.CHAR_S: "char", TK.SCHAR: "signed char", TK.CHAR_U: "char",
-    TK.UCHAR: "unsigned char",
-    TK.SHORT: "short", TK.USHORT: "unsigned short",
-    TK.INT: "int", TK.UINT: "unsigned int",
-    TK.LONGLONG: "long long", TK.ULONGLONG: "unsigned long long",
-    TK.FLOAT: "float", TK.DOUBLE: "double",
-    TK.CHAR16: "unsigned short",  # IDA has no portable char16_t
-    TK.CHAR32: "unsigned int",
-}
-# `long` differs between LLP64 and LP64; refuse it rather than guess.
-NONPORTABLE = {TK.LONG, TK.ULONG, TK.WCHAR, TK.LONGDOUBLE}
-
-
-class GenError(Exception):
-    pass
-
-
-def fail(msg, cur=None):
-    loc = ""
-    if cur is not None and cur.location.file:
-        loc = f"{cur.location.file.name}:{cur.location.line}: "
-    raise GenError(loc + msg)
-
 
 # ---------------------------------------------------------------- parsing
 
+def sdk_headers(sdk: Path):
+    return [h for sub in ("base", "gui", "vst")
+            for h in sorted((sdk / "pluginterfaces" / sub).glob("*.h"))
+            if h.name not in EXCLUDE]
+
+
 def umbrella(sdk: Path) -> str:
-    root = sdk / "pluginterfaces"
-    lines = []
-    for sub in ("base", "gui", "vst"):
-        for h in sorted((root / sub).glob("*.h")):
-            if h.name not in EXCLUDE:
-                lines.append(f'#include "pluginterfaces/{sub}/{h.name}"')
-    return "\n".join(lines) + "\n"
-
-
-def resource_dir():
-    """Builtin headers (stdint.h, stddef.h) for the pip-installed libclang."""
-    for exe in ("clang", "clang++"):
-        try:
-            return subprocess.check_output([exe, "-print-resource-dir"],
-                                           text=True).strip()
-        except (OSError, subprocess.CalledProcessError):
-            pass
-    raise GenError("need a clang binary on PATH for its builtin headers")
+    return "".join(f'#include "pluginterfaces/{h.parent.name}/{h.name}"\n'
+                   for h in sdk_headers(sdk))
 
 
 def parse(index, src: str, name: str, target: str, includes, lang="c++"):
-    args = [
-        f"--target={target}", "-nostdinc++", "-nostdlibinc",
-        "-Wno-pragma-pack", "-Wno-ignored-attributes",
-        f"-resource-dir={resource_dir()}",
-    ] + [f"-I{i}" for i in includes]
+    args = ["-nostdinc++", "-Wno-ignored-attributes"]
     args += ["-x", "c++", "-std=c++17"] if lang == "c++" else \
             ["-x", "c", "-std=c11", "-fms-extensions"]
-    tu = index.parse(name, args=args, unsaved_files=[(name, src)],
-                     options=ci.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES)
-    errs = [d for d in tu.diagnostics if d.severity >= ci.Diagnostic.Error]
-    if errs:
-        msg = "\n".join(f"  {d}" for d in errs[:20])
-        raise GenError(f"{target}: {len(errs)} parse error(s):\n{msg}")
-    return tu
+    return declgen.parse(index, src, name, target, includes, args)
 
 
 def qual_path(cur):
@@ -212,7 +164,7 @@ class Model:
                      self.decls[u])
             taken[n] = u
 
-class Emitter:
+class Emitter(TypeRenderer):
     def __init__(self, model: Model, packs=None):
         self.m = model
         self.packs = packs or {}  # flat name -> pack(N) needed on some ABI
@@ -221,73 +173,32 @@ class Emitter:
         self.forwarded = {}  # record usrs with a forward decl (ordered)
         self.active = set()    # cycle guard
 
-    # ---- type rendering: returns a C declarator for `name` of type `t`
-    def decl(self, t, name="", param=False):
-        t_kind = t.kind
-        const = "const " if t.is_const_qualified() else ""
+    # ---- type rendering hooks (see TypeRenderer.decl)
+    def typedef_ref(self, t, name, const, param):
+        d = t.get_declaration()
+        if d.get_usr() in self.m.decls and in_sdk(d):
+            self.need(d, by_value=True)
+            if param and t.get_canonical().kind in (
+                    TK.CONSTANTARRAY, TK.INCOMPLETEARRAY):
+                # `const TUID iid` decays to `const int8 *iid`; spell it
+                # that way so IDA never treats it as a 16-byte by-value arg
+                return with_const(const, self.decl(d.underlying_typedef_type,
+                                                   name, param=True))
+            return f"{const}{self.m.names[d.get_usr()]} {name}".rstrip()
+        # typedef from outside the SDK (stdint): use its canonical type
+        return self.decl(t.get_canonical(), name, param)
 
-        if t_kind in (TK.LVALUEREFERENCE, TK.RVALUEREFERENCE):
-            # same ABI as a pointer
-            return self.decl(t.get_pointee(), f"*{name}")
-        if t_kind == TK.POINTER:
-            inner = f"*{const.strip() + ' ' if const else ''}{name}".rstrip()
-            p = t.get_pointee()
-            if p.kind in (TK.FUNCTIONPROTO, TK.FUNCTIONNOPROTO):
-                return self.func(p, f"({inner})")
-            return self.decl(p, inner)
-        if t_kind in (TK.CONSTANTARRAY, TK.INCOMPLETEARRAY):
-            elem = t.element_type
-            if param:  # arrays decay in parameter lists
-                r = self.decl(elem, f"*{name}")
-                return const + r if const and not r.startswith("const ") else r
-            n = t.element_count if t_kind == TK.CONSTANTARRAY else ""
-            inner = f"({name})" if name.startswith("*") else name
-            return self.decl(elem, f"{inner}[{n}]")
-        if t_kind == TK.ELABORATED:
-            r = self.decl(t.get_named_type(), name, param)
-            return const + r if const and not r.startswith("const ") else r
-        if t_kind == TK.TYPEDEF:
-            d = t.get_declaration()
-            if d.get_usr() in self.m.decls and in_sdk(d):
-                self.need(d, by_value=True)
-                if param and t.get_canonical().kind in (
-                        TK.CONSTANTARRAY, TK.INCOMPLETEARRAY):
-                    # `const TUID iid` decays to `const int8 *iid`; spell it
-                    # that way so IDA never treats it as a 16-byte by-value arg
-                    r = self.decl(d.underlying_typedef_type, name, param=True)
-                    return const + r if const and \
-                        not r.startswith("const ") else r
-                return f"{const}{self.m.names[d.get_usr()]} {name}".rstrip()
-            # typedef from outside the SDK (stdint): use its canonical type
-            return self.decl(t.get_canonical(), name, param)
-        if t_kind in (TK.RECORD, TK.ENUM):
-            d = t.get_declaration()
-            if d.is_anonymous():
-                fail("anonymous type used outside a field", d)
-            usr = d.get_usr()
-            if usr not in self.m.decls:
-                if t_kind == TK.RECORD and usr in self.forwarded:
-                    # opaque foreign handle (wl_display etc.)
-                    return f"{const}{d.spelling} {name}".rstrip()
-                fail(f"type '{t.spelling}' is outside the SDK namespace", d)
-            return f"{const}{self.m.names[usr]} {name}".rstrip()
-        if t_kind in NONPORTABLE:
-            fail(f"non-portable builtin '{t.spelling}'")
-        if t_kind in BUILTIN:
-            return f"{const}{BUILTIN[t_kind]} {name}".rstrip()
-        if t_kind == TK.NULLPTR:
-            return f"void *{name}"
-        fail(f"unhandled type kind {t_kind} ('{t.spelling}')")
-
-    def func(self, fn, inner, this=None, cc=""):
-        params = []
-        if this:
-            params.append(f"{this} *__hidden this")
-        for i, a in enumerate(fn.argument_types()):
-            params.append(self.decl(a, f"a{i + 1}", param=True))
-        ret = self.decl(fn.get_result())
-        return f"{ret} ({cc}{inner[1:-1] if inner.startswith('(') else inner})" \
-               f"({', '.join(params) or 'void'})"
+    def tag_ref(self, t, name, const):
+        d = t.get_declaration()
+        if d.is_anonymous():
+            fail("anonymous type used outside a field", d)
+        usr = d.get_usr()
+        if usr not in self.m.decls:
+            if t.kind == TK.RECORD and usr in self.forwarded:
+                # opaque foreign handle (wl_display etc.)
+                return f"{const}{d.spelling} {name}".rstrip()
+            fail(f"type '{t.spelling}' is outside the SDK namespace", d)
+        return f"{const}{self.m.names[usr]} {name}".rstrip()
 
     # ---- dependency handling
     def need(self, cur, by_value):
@@ -307,9 +218,8 @@ class Emitter:
         usr = cur.get_usr()
         if usr in self.forwarded or usr in self.done:
             return
-        kw = "union" if cur.kind == CK.UNION_DECL else "struct"
         n = self.m.names.get(usr, cur.spelling)
-        self.out.append(f"typedef {kw} {n} {n};")
+        self.out.append(f"typedef {kw(cur)} {n} {n};")
         self.forwarded[usr] = None
 
     def deps(self, t):
@@ -403,51 +313,13 @@ class Emitter:
         return (f"typedef enum {name}{base} {{\n" + "\n".join(vals) +
                 f"\n}} {name};")
 
-    @staticmethod
-    def anon_record(cur):
-        return cur.kind in (CK.STRUCT_DECL, CK.UNION_DECL) and \
-            cur.is_anonymous()
+    def record_lines(self, cur, indent):
+        vptr = [f"{indent}void *__vftable;"] if self.has_vptr(cur) else []
+        return vptr + super().record_lines(cur, indent)
 
-    @staticmethod
-    def anon_member(cur):
-        """`union { ... };` with no member name (C11 anonymous member), as
-        opposed to `union { ... } u;`. Older libclang lacks
-        is_anonymous_record_decl(), so check whether any field uses it."""
-        if not Emitter.anon_record(cur):
-            return False
-        parent = cur.semantic_parent
-        return not any(f.kind == CK.FIELD_DECL and
-                       f.type.get_declaration() == cur
-                       for f in parent.get_children())
-
-    def record_body(self, cur, indent="\t"):
-        lines = []
-        if self.has_vptr(cur):
-            lines.append(f"{indent}void *__vftable;")
-        for c in cur.get_children():
-            # C++ anonymous union/struct: libclang shows the record decl and
-            # hides the implicit field, so inline it where it is declared.
-            if self.anon_member(c):
-                kw = "union" if c.kind == CK.UNION_DECL else "struct"
-                inner = self.record_body(c, indent + "\t")
-                lines.append(f"{indent}{kw} {{\n{inner}\n{indent}}};")
-                continue
-            if c.kind != CK.FIELD_DECL:
-                continue
-            t = c.type
-            td = t.get_declaration()
-            if self.anon_record(td):
-                if self.anon_member(td):
-                    continue  # already inlined above
-                kw = "union" if td.kind == CK.UNION_DECL else "struct"
-                inner = self.record_body(td, indent + "\t")
-                lines.append(f"{indent}{kw} {{\n{inner}\n{indent}}} "
-                             f"{c.spelling};")
-                continue
-            self.deps(t)
-            bits = f" : {c.get_bitfield_width()}" if c.is_bitfield() else ""
-            lines.append(f"{indent}{self.decl(t, c.spelling)}{bits};")
-        return "\n".join(lines)
+    def field(self, f):
+        self.deps(f.type)
+        return super().field(f)
 
     @staticmethod
     def has_vptr(cur):
@@ -466,7 +338,7 @@ class Emitter:
         while stack:
             r = stack.pop()
             for c in r.get_children():
-                if Emitter.anon_record(c):
+                if anon_record(c):
                     stack.append(c)
                     continue
                 if c.kind != CK.FIELD_DECL:
@@ -491,16 +363,14 @@ class Emitter:
 
     def emit_record(self, cur):
         name = self.m.names[cur.get_usr()]
-        kw = "union" if cur.kind == CK.UNION_DECL else "struct"
         for b in cur.get_children():
             if b.kind == CK.CXX_BASE_SPECIFIER:
                 fail("data struct with a base class is not supported", cur)
             if b.kind == CK.CXX_METHOD and b.is_virtual_method():
                 fail("struct mixes data and virtual methods", cur)
         self.forward(cur)
-        body = self.record_body(cur)
-        text = f"{kw} {name} {{\n{body}\n}};" if body else \
-            f"{kw} {name} {{\n\tchar __empty;\n}};"
+        body = self.record_body(cur) or "\tchar __empty;"
+        text = f"{kw(cur)} {name} {{\n{body}\n}};"
         pack = self.packs.get(name, self.pack_of(cur))
         if pack:
             text = f"#pragma pack(push, {pack})\n{text}\n#pragma pack(pop)"
@@ -586,9 +456,7 @@ def collect_iids(sdk: Path, model: Model):
     for usr, cur in model.interfaces.items():
         by_spelling.setdefault(cur.spelling, []).append(model.names[usr])
     iids = []
-    for h in sorted(p for sub in ("base", "gui", "vst")
-                    for p in (sdk / "pluginterfaces" / sub).glob("*.h")
-                    if p.name not in EXCLUDE):
+    for h in sdk_headers(sdk):
         src = re.sub(r"/\*.*?\*/|//[^\n]*", "", h.read_text(errors="replace"),
                      flags=re.S)
         for m in IID_RE.finditer(src):
@@ -603,9 +471,6 @@ def collect_iids(sdk: Path, model: Model):
     if not iids:
         raise GenError("no DECLARE_CLASS_IID found - macro renamed?")
     return iids
-
-
-TRESULT_RE = re.compile(r"#if COM_COMPATIBLE.*?enum\s*\{(.*?)\};", re.S)
 
 
 def tresult_enums(sdk: Path):
@@ -644,31 +509,6 @@ def tresult_enums(sdk: Path):
 
 
 # ---------------------------------------------------------------- verify
-
-def field_layout(rec, base=0, prefix="", out=None, top=None):
-    """name -> byte offset for every named member, anonymous members
-    included. clang resolves names inside anonymous records from the
-    enclosing type, so offsets are always asked of `top`."""
-    out = {} if out is None else out
-    top = rec if top is None else top
-    for c in rec.get_children():
-        if Emitter.anon_member(c):
-            field_layout(c, base, prefix, out, top)
-            continue
-        if c.kind != CK.FIELD_DECL:
-            continue
-        td = c.type.get_declaration()
-        if Emitter.anon_member(td):
-            continue
-        off = top.type.get_offset(c.spelling)
-        if off < 0:
-            continue
-        out[prefix + c.spelling] = base + off // 8
-        if Emitter.anon_record(td):  # named member of anonymous type
-            field_layout(td, base + off // 8, prefix + c.spelling + ".",
-                         out, td)
-    return out
-
 
 def records_by_name(tu_cursor, want):
     found = {}
@@ -727,26 +567,9 @@ def verify(index, sdk, umb, text, target, model):
 
 # ---------------------------------------------------------------- main
 
-def sdk_revision(sdk: Path):
-    for d in (sdk / "pluginterfaces", sdk):
-        try:
-            return subprocess.check_output(
-                ["git", "-C", str(d), "describe", "--always", "--tags",
-                 "--dirty"], stderr=subprocess.DEVNULL, text=True).strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-    return "unknown"
-
-
 def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawTextHelpFormatter)
-    ap.add_argument("--sdk", type=Path, required=True,
-                    help="directory containing pluginterfaces/")
-    ap.add_argument("--types", type=Path, required=True)
-    ap.add_argument("--iids", type=Path, required=True)
-    ap.add_argument("--no-verify", action="store_true")
-    args = ap.parse_args()
+    args = declgen.arg_parser(__doc__, "directory containing pluginterfaces/",
+                              "types", "iids").parse_args()
 
     sdk = args.sdk.resolve()
     if not (sdk / "pluginterfaces/base/funknown.h").exists():
@@ -773,39 +596,33 @@ def main():
                         n = tm.names[usr]
                         packs[n] = min(p, packs.get(n, p))
         body = Emitter(model, packs).run()
-        rev = sdk_revision(sdk)
+        rev = declgen.sdk_revision(sdk / "pluginterfaces", sdk)
+        source = f"steinbergmedia/vst3_pluginterfaces @ {rev} (MIT)"
         text = "\n\n".join([
-            "// GENERATED by tools/gen_vst3_types.py - do not edit.\n"
-            f"// Source: steinbergmedia/vst3_pluginterfaces @ {rev} (MIT)\n"
-            "// __RV_API is replaced at load time: __stdcall on 32-bit "
-            "Windows, empty elsewhere.",
+            declgen.generated_header(
+                SCRIPT, source, "__RV_API is replaced at load time: "
+                "__stdcall on 32-bit Windows, empty elsewhere."),
             "\n".join(body),
             tresult_enums(sdk),
         ]) + "\n"
 
         if not args.no_verify:
-            for target, label in TARGETS.items():
+            def verify_one(target):
                 n, v, problems = verify(index, sdk, umb, text, target, model)
-                status = "OK" if not problems else f"{len(problems)} MISMATCH"
-                print(f"verify {label:8} {n:3} structs, {v:3} vtables: "
-                      f"{status}")
-                if problems:
-                    print("\n".join("  " + p for p in problems[:30]))
-                    sys.exit(1)
+                return f"{n:3} structs, {v:3} vtables", problems
+            declgen.run_verify(verify_one)
 
         iids = collect_iids(sdk, model)
         iid_text = (
-            "// GENERATED by tools/gen_vst3_types.py - do not edit.\n"
-            f"// Source: steinbergmedia/vst3_pluginterfaces @ {rev} (MIT)\n"
-            "// RV_IID(Name, l1, l2, l3, l4): words as in DECLARE_CLASS_IID.\n"
-            + "".join(f"RV_IID({n}, 0x{a:08X}, 0x{b:08X}, 0x{c:08X}, "
+            declgen.generated_header(
+                SCRIPT, source,
+                "RV_IID(Name, l1, l2, l3, l4): words as in DECLARE_CLASS_IID.")
+            + "\n" + "".join(f"RV_IID({n}, 0x{a:08X}, 0x{b:08X}, 0x{c:08X}, "
                       f"0x{d:08X})\n" for n, (a, b, c, d) in iids))
     except GenError as e:
         sys.exit(f"error: {e}")
 
-    args.types.parent.mkdir(parents=True, exist_ok=True)
-    args.types.write_text(text)
-    args.iids.write_text(iid_text)
+    declgen.write((args.types, text), (args.iids, iid_text))
     print(f"{len(model.interfaces)} interfaces, {len(iids)} IIDs, "
           f"{len(text) // 1024} KiB -> {args.types}, {args.iids}")
 
