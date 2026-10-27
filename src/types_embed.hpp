@@ -6,7 +6,8 @@
 // is reintroduced
 namespace rv {
 inline const char* get_types_decl(Interface iface) {
-	return get_format_module(iface)->types_decl;
+	const FormatModule* fm = get_format_module(iface);
+	return fm ? fm->types_decl : nullptr;
 }
 
 // Generated decls spell the SDK's PLUGIN_API as __RV_API: __stdcall on
