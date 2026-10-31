@@ -13,9 +13,8 @@ static const FormatModule kVst3 = { RV_VST3_TYPES_SRC, &vst3::scan,
 	&vst3::label_factory };
 static const FormatModule kVst2 = { RV_VST2_TYPES_SRC, &vst2::scan,
 	&vst2::label_entry };
-
-// TODO: Implement CLAP
-static const FormatModule kClap = { RV_CLAP_TYPES_SRC, 0, 0 };
+static const FormatModule kClap = { RV_CLAP_TYPES_SRC, &clap::scan,
+	&clap::label };
 
 const FormatModule* get_format_module(Interface iface) {
 	switch (iface) {

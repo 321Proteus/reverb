@@ -44,6 +44,8 @@ set(PLUGIN_SOURCES
     src/common/format.hpp
     src/common/stores.hpp
     src/common/framework.hpp
+    src/common/member.cpp
+    src/common/function_iterator.hpp
 
     src/common/vtable/layout.hpp
     src/common/vtable/layout.cpp
