@@ -1,4 +1,5 @@
 #include "id_returns.hpp"
+#include "core/log.hpp"
 #include "db/segments.hpp"
 #include "db/read.hpp"
 #include "decomp/ctree.hpp"
@@ -40,15 +41,35 @@ static bool literal_arg(cexpr_t* call, qstring& out) {
 	return false;
 }
 
+// The statement itself, or the last one of a block. A branch that returns
+// ends in the return, even when it logs something first
+static cinsn_t* last_stmt(cinsn_t* i) {
+	if (i != nullptr && i->op == cit_block)
+		i = i->cblock->empty() ? nullptr : &i->cblock->back();
+	return i;
+}
+
 // return &x; or return x; (array decay)
 static ea_t returned_obj(cinsn_t* i) {
-	if (i != nullptr && i->op == cit_block)
-		i = i->cblock->empty() ? nullptr : &i->cblock->front();
+	i = last_stmt(i);
 	if (i == nullptr || i->op != cit_return) return BADADDR;
 
 	cexpr_t* e = strip_casts(&i->creturn->expr);
 	if (e->op == cot_ref) e = strip_casts(e->x);
 	return e->op == cot_obj ? e->obj_ea : BADADDR;
+}
+
+// return 0; or return nullptr;
+static bool returns_null(cinsn_t* i) {
+	i = last_stmt(i);
+	if (i == nullptr || i->op != cit_return) return false;
+
+	cexpr_t* e = strip_casts(&i->creturn->expr);
+	return e->op == cot_num && e->numval() == 0;
+}
+
+static bool is_compound(const cexpr_t* c) {
+	return c->op == cot_land || c->op == cot_lor;
 }
 
 struct id_return_finder_t : public ctree_visitor_t {
@@ -57,18 +78,89 @@ struct id_return_finder_t : public ctree_visitor_t {
 
 	id_return_finder_t(int var) : ctree_visitor_t(CV_FAST) { vars.insert(var); }
 
-	int idaapi visit_insn(cinsn_t* i) override {
-		if (i->op != cit_if) return 0;
+	// cmp(id, "literal") in any of the accepted forms
+	bool id_cmp(cexpr_t* c, bool& in_then, qstring& id) {
+		cexpr_t* call = cmp_call(c, in_then);
+		return call != nullptr && arg_pos(call, vars) >= 0 &&
+			   literal_arg(call, id);
+	}
+
+	// Ids of a compound condition that make it true, so they match in the
+	// then-branch.
+	bool collect(cexpr_t* c, bool cond, std::vector<id_return_t>& ids) {
+		c = strip_casts(c);
+		if (is_compound(c)) {
+			const bool land = c->op == cot_land;
+			return collect(c->x, cond || land, ids) &&
+				   collect(c->y, cond || land, ids);
+		}
 
 		bool in_then;
-		cexpr_t* call = cmp_call(&i->cif->expr, in_then);
 		id_return_t r;
-		if (call == nullptr || arg_pos(call, vars) < 0 ||
-			!literal_arg(call, r.id))
-			return 0;
+		if (!id_cmp(c, in_then, r.id)) return true; // not about the id
+		if (!in_then) return false;
 
-		r.ea = returned_obj(in_then ? i->cif->ithen : i->cif->ielse);
-		if (r.ea != BADADDR) out.push_back(r);
+		r.conditional = cond;
+		ids.push_back(r);
+		return true;
+	}
+
+	// The ids an if compares with, and whether they match in the then-branch
+	bool id_check(cinsn_t* i, bool& in_then, std::vector<id_return_t>& ids) {
+		ids.clear();
+		if (i->op != cit_if) return false;
+
+		cexpr_t* c = strip_casts(&i->cif->expr);
+		if (is_compound(c)) {
+			in_then = true;
+			if (!collect(c, false, ids)) {
+				rv_log("%a: negated compound id check, skipped", i->ea);
+				ids.clear();
+			}
+			return !ids.empty();
+		}
+
+		// !(A && B)
+		if (c->op == cot_lnot && is_compound(strip_casts(c->x))) {
+			std::vector<id_return_t> tmp;
+			if (!collect(c->x, false, tmp) || !tmp.empty())
+				rv_log("%a: negated compound id check, skipped", i->ea);
+			return false;
+		}
+
+		id_return_t r;
+		if (!id_cmp(c, in_then, r.id)) return false;
+		ids.push_back(r);
+		return true;
+	}
+
+	void add(std::vector<id_return_t>& ids, ea_t ea) {
+		if (ea == BADADDR) return;
+		for (id_return_t& r : ids) {
+			r.ea = ea;
+			out.push_back(r);
+		}
+	}
+
+	int idaapi visit_insn(cinsn_t* i) override {
+		std::vector<id_return_t> ids;
+		bool in_then;
+		if (id_check(i, in_then, ids)) {
+			add(ids, returned_obj(in_then ? i->cif->ithen : i->cif->ielse));
+			return 0;
+		}
+		if (i->op != cit_block) return 0;
+
+		// if (cmp(id, "a")) return 0; return &a;
+		cblock_t* b = i->cblock;
+		for (auto it = b->begin(); it != b->end(); ++it) {
+			auto next = it;
+			if (++next == b->end()) break;
+
+			if (id_check(&*it, in_then, ids) && !in_then &&
+				it->cif->ielse == nullptr && returns_null(it->cif->ithen))
+				add(ids, returned_obj(&*next));
+		}
 		return 0;
 	}
 };
