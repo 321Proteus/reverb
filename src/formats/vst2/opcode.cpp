@@ -1,9 +1,11 @@
 #include "opcode.hpp"
-#include "common/analysis.hpp"
-#include "common/dispatch.hpp"
-#include "common/stores.hpp"
-#include "common/vtable.hpp"
-#include "util.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "decomp/ctree.hpp"
+#include "decomp/analysis.hpp"
+#include "patterns/dispatch.hpp"
+#include "decomp/stores.hpp"
+#include "cxx/vtable.hpp"
 #include <algorithm>
 #include <bytes.hpp>
 #include <funcs.hpp>

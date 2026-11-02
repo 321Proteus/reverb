@@ -1,6 +1,7 @@
+#include "core/log.hpp"
+#include "decomp/ctree.hpp"
 #include "vst2.hpp"
-#include "common/analysis.hpp"
-#include "util.hpp"
+#include "decomp/analysis.hpp"
 #include <auto.hpp>
 #include <funcs.hpp>
 #include <hexrays.hpp>

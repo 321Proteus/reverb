@@ -1,9 +1,11 @@
 #include "descriptor.hpp"
-#include "common/analysis.hpp"
-#include "common/function_iterator.hpp"
-#include "common/member.hpp"
-#include "common/refs.hpp"
-#include "common/stores.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "db/read.hpp"
+#include "db/types.hpp"
+#include "decomp/analysis.hpp"
+#include "db/func_iter.hpp"
+#include "db/members.hpp"
 #include <name.hpp>
 #include <set>
 

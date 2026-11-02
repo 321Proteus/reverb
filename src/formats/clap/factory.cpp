@@ -1,11 +1,14 @@
 #include "factory.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "db/read.hpp"
 #include <bytes.hpp>
 #include <funcs.hpp>
-#include "common/function_iterator.hpp"
+#include "db/func_iter.hpp"
 #include <pro.h>
-#include "common/analysis.hpp"
-#include "common/stores.hpp"
-#include "common/id_dispatch.hpp"
+#include "decomp/analysis.hpp"
+#include "decomp/stores.hpp"
+#include "patterns/id_returns.hpp"
 #include <algorithm>
 #include "exts.hpp"
 

@@ -1,14 +1,16 @@
-#include "common/analysis.hpp"
-#include "common/stores.hpp"
-#include "vst2.hpp"
 #include "aeffect.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "db/read.hpp"
+#include "decomp/analysis.hpp"
+#include "decomp/stores.hpp"
+#include "vst2.hpp"
 #include <cstring>
 #include <hexrays.hpp>
 #include <ida.hpp>
 #include <llong.hpp>
 #include <pro.h>
 #include <segment.hpp>
-#include <util.hpp>
 #include <vector>
 
 namespace rv::vst2 {

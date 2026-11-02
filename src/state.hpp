@@ -1,6 +1,6 @@
 #pragma once
-#include "reverb.hpp"
-#include "common/framework.hpp"
+#include "core/reverb.hpp"
+#include "frameworks/framework.hpp"
 
 namespace rv {
 InterfaceSet get_detected_interfaces();

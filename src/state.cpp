@@ -1,5 +1,5 @@
 #include "state.hpp"
-#include "reverb.hpp"
+#include "core/reverb.hpp"
 
 namespace rv {
 static InterfaceSet g_iface_set = InterfaceSet();

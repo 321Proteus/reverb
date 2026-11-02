@@ -1,9 +1,11 @@
+#include "core/log.hpp"
+#include "db/read.hpp"
+#include "db/types.hpp"
 #include "clap.hpp"
 #include "factory.hpp"
 #include "descriptor.hpp"
-#include "common/analysis.hpp"
-#include "common/member.hpp"
-#include "util.hpp"
+#include "decomp/analysis.hpp"
+#include "db/members.hpp"
 #include <bytes.hpp>
 #include <cstddef>
 #include <name.hpp>

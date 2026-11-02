@@ -1,9 +1,9 @@
+#include "core/log.hpp"
 #include "opcode.hpp"
-#include "common/analysis.hpp"
-#include "common/vtable.hpp"
+#include "decomp/analysis.hpp"
+#include "cxx/vtable.hpp"
 #include "aeffect.hpp"
 #include "vst2.hpp"
-#include "util.hpp"
 #include <auto.hpp>
 #include <funcs.hpp>
 #include <hexrays.hpp>
@@ -19,7 +19,7 @@
 #include <set>
 #include <utility>
 #include <ua.hpp>
-#include "common/function_iterator.hpp"
+#include "db/func_iter.hpp"
 
 // Calls cb(ea) for every aligned occurrence of x in the loaded
 // image, excluding matches that sit inside instructions (find_imm already
