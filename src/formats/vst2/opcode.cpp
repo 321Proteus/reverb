@@ -128,7 +128,7 @@ void harvest(const dispatch_case_t& c, dispatcher_info_t& out) {
 	if (!out.handled.insert(op).second) return; // outer level already has it
 
 	const size_t max_len = max_str_len(op);
-	harvest_t h{ max_len > 0 || op == EFF_CAN_DO, is_const_op(op) };
+	harvest_t h{max_len > 0 || op == EFF_CAN_DO, is_const_op(op)};
 	if (!h.want_str && !h.want_const) return;
 
 	h.gather(c.body, c.cf, c.obj, c.ptrvars, 0);
@@ -176,8 +176,7 @@ struct am_call_finder_t : public ctree_visitor_t {
 		if (fn->op != cot_obj) return 0; // skips audioMaster(...) itself
 
 		cexpr_t* a0 = strip_casts(&e->a->at(0));
-		calls.push_back(
-			{ fn->obj_ea, pos, a0->op == cot_var ? a0->v.idx : -1 });
+		calls.push_back({fn->obj_ea, pos, a0->op == cot_var ? a0->v.idx : -1});
 		return 0;
 	}
 };
@@ -296,9 +295,7 @@ void apply_dispatcher(const std::vector<dispatcher_info_t>& infos) {
 				c.cat_sprnt(" %s", s.c_str());
 		}
 
-		c.cat_sprnt("\nhandles %u opcodes:", unsigned(info.handled.size()));
-		for (uint32 op : info.handled)
-			c.cat_sprnt(" %s", opcode_name(op).c_str());
+		c.cat_sprnt("\nhandles %u opcodes", unsigned(info.handled.size()));
 	}
 
 	if (func_t* f = get_func(first.dispatcher))
