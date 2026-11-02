@@ -1,5 +1,6 @@
 #include "clap.hpp"
 #include "factory.hpp"
+#include "descriptor.hpp"
 #include "common/analysis.hpp"
 #include "common/member.hpp"
 #include "util.hpp"
@@ -25,6 +26,7 @@ struct entry_info_t {
 
 static entry_info_t g_entry;
 static bool g_valid = false;
+static std::vector<desc_t> g_descs;
 
 static ea_t find_entry() {
 	for (const char* n : { "clap_entry", "_clap_entry" }) {
@@ -117,9 +119,21 @@ static void label_fn_table(ea_t ea, const char* type, const char* prefix) {
 	}
 }
 
+// get_plugin_count usually just returns a constant
+static void check_plugin_count(ea_t factory, size_t found) {
+	const ea_t gpc =
+		member_ptr(factory, "clap_plugin_factory_t", "get_plugin_count");
+	uint64 n;
+	if (gpc != BADADDR && rv::const_return(gpc, &n) && n != found)
+		rv_log("get_plugin_count at %a returns %llu, but %u descriptor(s) "
+			   "were found",
+			gpc, (unsigned long long)n, unsigned(found));
+}
+
 void scan() {
 	g_valid = false;
 	g_entry = {};
+	g_descs.clear();
 
 	const ea_t ea = find_entry();
 	if (ea == BADADDR) {
@@ -142,13 +156,34 @@ void scan() {
 	ea_t gf_ea = member_ptr(ea, tif, "get_factory");
 
 	for (const factory_hit_t& f : find_factories(gf_ea)) {
+		const bool plugin = strcmp(f.kind->name, "PLUGIN") == 0;
+		std::vector<desc_t> descs;
+
+		if (plugin) {
+			descs = find_descriptors(
+				member_ptr(f.ea, f.kind->type, "get_plugin_descriptor"));
+			// an assumed plugin factory is confirmed by its descriptors
+			if (f.assumed && descs.empty()) {
+				rv_log("Unknown CLAP factory at %a", f.ea);
+				continue;
+			}
+		}
+
 		rv_log("Factory %s (\"%s\") at %a", f.kind->name, f.kind->id, f.ea);
+
 		qstring prefix(f.kind->type);
-		if (prefix.ends_with("_t"))
-			prefix.remove_last(2); // clap_plugin_factory
+
+		if (prefix.ends_with("_t")) prefix.remove_last(2);
 		label_fn_table(f.ea, f.kind->type, prefix.c_str());
+
 		if (has_dummy_name(get_flags(f.ea)))
 			set_name(f.ea, prefix.c_str(), SN_NOWARN | SN_FORCE);
+
+		if (!plugin) continue;
+		for (const desc_t& d : descs)
+			label_descriptor(d);
+		check_plugin_count(f.ea, descs.size());
+		g_descs.insert(g_descs.end(), descs.begin(), descs.end());
 	}
 	mark_cfunc_dirty(gf_ea);
 }

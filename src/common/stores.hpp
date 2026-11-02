@@ -368,6 +368,20 @@ inline bool read_cstr(ea_t ea, qstring& out, size_t max_len = 256) {
 	return is_text(out);
 }
 
+// Read a raw NUL-terminated UTF-8 string without IDA's string reader (which
+// gets some emoji wrong). An empty string is valid.
+inline bool read_utf8(ea_t ea, qstring& out, size_t max_len = 1024) {
+	out.clear();
+	for (size_t i = 0; i < max_len; i++) {
+		if (!is_loaded(ea + i)) return false;
+
+		const uchar c = get_byte(ea + i);
+		if (c == 0) return out.empty() || is_text(out);
+		out += char(c);
+	}
+	return false;
+}
+
 inline qstring fourcc(uint32 v) {
 	char c[5] = { char(v >> 24), char(v >> 16), char(v >> 8), char(v), 0 };
 	for (int i = 0; i < 4; i++)

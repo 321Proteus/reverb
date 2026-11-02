@@ -38,6 +38,12 @@ inline bool in_exec_seg(ea_t ea) {
 	return (s->perm & SEGPERM_EXEC) != 0 || s->type == SEG_CODE;
 }
 
+// Imports (extern, IAT, Mach-O stub targets)
+inline bool in_extern_seg(ea_t ea) {
+	segment_t* s = getseg(ea);
+	return s != nullptr && s->type == SEG_XTRN;
+}
+
 inline bool is_code_addr(ea_t ea) {
 
 	if (ea == BADADDR || !is_mapped(ea)) return false;

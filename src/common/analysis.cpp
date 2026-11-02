@@ -111,6 +111,20 @@ cfuncptr_t decompile_with_args(ea_t ea, int min_args, const tinfo_t* site) {
 	return again != nullptr ? again : cf;
 }
 
+bool const_return(ea_t ea, uint64* out) {
+	cfuncptr_t cf = decompile_at(ea);
+	if (cf == nullptr || cf->body.op != cit_block) return false;
+
+	cblock_t* b = cf->body.cblock;
+	if (b->size() != 1 || b->front().op != cit_return) return false;
+
+	cexpr_t* e = strip_casts(&b->front().creturn->expr);
+	if (e->op != cot_num) return false;
+
+	*out = e->numval();
+	return true;
+}
+
 bool apply_definite_proto(ea_t ea, const char* decl) {
 	tinfo_t tif;
 	if (!parse_decl(&tif, nullptr, get_idati(), decl, PT_SIL)) {

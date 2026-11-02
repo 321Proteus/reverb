@@ -45,6 +45,8 @@ set(PLUGIN_SOURCES
     src/common/stores.hpp
     src/common/framework.hpp
     src/common/member.cpp
+    src/common/id_dispatch.cpp
+    src/common/id_dispatch.hpp
     src/common/function_iterator.hpp
 
     src/common/vtable/layout.hpp

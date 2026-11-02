@@ -25,6 +25,9 @@ cfuncptr_t decompile_with_args(ea_t ea, int min_args, const tinfo_t* site);
 // Follow jump and this-adjusting thunks
 ea_t resolve_thunk(ea_t ea, int max_hops = 3);
 
+// The constant of a function that decompiles to just `return <const>;`
+bool const_return(ea_t ea, uint64* out);
+
 // Parse a C declaration and apply it as a user-defined (definite) type.
 bool apply_definite_proto(ea_t ea, const char* decl);
 
