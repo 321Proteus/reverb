@@ -1,6 +1,7 @@
 #include "label.hpp"
 #include "core/log.hpp"
 #include "db/read.hpp"
+#include "db/segments.hpp"
 #include "db/types.hpp"
 #include "decomp/analysis.hpp"
 #include <bytes.hpp>
@@ -10,33 +11,6 @@
 #include <segment.hpp>
 
 namespace rv::clap {
-
-// Find nwind and exception table references
-static bool is_metadata_ref(ea_t from) {
-	segment_t* s = getseg(from);
-	if (!s) return false;
-
-	qstring n;
-	get_segm_name(&n, s);
-
-	static const char* const META_SECTIONS[] = {
-		// PE64 unwind
-		".pdata",
-		".xdata",
-		// ELF
-		".eh_frame",
-		".eh_frame_hdr",
-		".gcc_except_table",
-		// Mach O
-		"__unwind_info",
-		"__eh_frame",
-		"__gcc_except_tab",
-	};
-
-	for (const char* m : META_SECTIONS)
-		if (n == m) return true;
-	return false;
-}
 
 fn_ref_t classify_fn(ea_t fn, ea_t owner, size_t owner_size) {
 	fn_ref_t r;
@@ -51,7 +25,7 @@ fn_ref_t classify_fn(ea_t fn, ea_t owner, size_t owner_size) {
 		ok = xb.next_to()) {
 		if (xb.iscode && xb.type == fl_F) continue;
 		if (xb.from >= owner && xb.from < owner + owner_size) continue;
-		if (!xb.iscode && is_metadata_ref(xb.from)) continue;
+		if (!xb.iscode && in_metadata_seg(xb.from)) continue;
 		r.shared = true;
 	}
 	return r;

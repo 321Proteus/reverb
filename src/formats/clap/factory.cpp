@@ -15,12 +15,13 @@
 
 namespace rv::clap {
 
-// Return whether every func pointer member points into local code and the
-// struct is loaded. Imports are rejected to avoid GOT slots like strcmp getting
-// mistaken for tables
+// Return whether every func pointer member points into local code, other
+// pointer members don't, and the struct is loaded outside GOT. Runs of GOT
+// slots (strcmp, local functions in PIC) and vtables are not tables
 bool is_fn_table(ea_t ea, const tinfo_t& tif) {
 	const size_t sz = tif.get_size();
-	if (sz == BADSIZE || !is_loaded(ea) || !is_loaded(ea + sz - 1))
+	if (sz == BADSIZE || !is_loaded(ea) || !is_loaded(ea + sz - 1) ||
+		in_got_seg(ea))
 		return false;
 
 	udt_type_data_t udt;
@@ -28,8 +29,11 @@ bool is_fn_table(ea_t ea, const tinfo_t& tif) {
 
 	int fns = 0;
 	for (const udm_t& m : udt) {
-		if (!m.type.is_funcptr()) continue;
 		const ea_t fn = read_ptr(ea + m.offset / 8);
+		if (!m.type.is_funcptr()) {
+			if (m.type.is_ptr() && is_code_addr(fn)) return false; // desc
+			continue;
+		}
 		if (!is_code_addr(fn) || in_extern_seg(fn)) return false;
 		fns++;
 	}

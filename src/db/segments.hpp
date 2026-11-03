@@ -16,6 +16,55 @@ inline bool in_extern_seg(ea_t ea) {
 	return s != nullptr && s->type == SEG_XTRN;
 }
 
+// Find nwind and exception table references
+static bool in_metadata_seg(ea_t ea) {
+	segment_t* s = getseg(ea);
+	if (!s) return false;
+
+	qstring n;
+	get_segm_name(&n, s);
+
+	static const char* const META_SECTIONS[] = {
+		// PE64 unwind
+		".pdata",
+		".xdata",
+		// ELF
+		".eh_frame",
+		".eh_frame_hdr",
+		".gcc_except_table",
+		// Mach O
+		"__unwind_info",
+		"__eh_frame",
+		"__gcc_except_tab",
+	};
+
+	for (const char* m : META_SECTIONS)
+		if (n == m) return true;
+	return false;
+}
+
+// Pointer slots the loader resolves: ELF GOT, Mach-O symbol pointers
+inline bool in_got_seg(ea_t ea) {
+	segment_t* s = getseg(ea);
+	if (!s) return false;
+
+	qstring n;
+	get_segm_name(&n, s);
+
+	static const char* const GOT_SECTIONS[] = {
+		".got",
+		".got.plt",
+		"__got",
+		"__la_symbol_ptr",
+		"__nl_symbol_ptr",
+		"__auth_got",
+	};
+
+	for (const char* g : GOT_SECTIONS)
+		if (n == g) return true;
+	return false;
+}
+
 inline bool is_code_addr(ea_t ea) {
 
 	if (ea == BADADDR || !is_mapped(ea)) return false;

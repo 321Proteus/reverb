@@ -9,6 +9,7 @@
 #include "db/func_iter.hpp"
 #include "db/members.hpp"
 #include <functional>
+#include <map>
 #include <name.hpp>
 #include <set>
 
@@ -178,35 +179,70 @@ static void from_stores(ea_t fn, const tinfo_t& tif, std::vector<desc_t>& out) {
 	}
 }
 
-// The one zero-filled, descriptor-sized object get_plugin_descriptor takes
-// the address of: storage that the init function fills in
+static bool zero_filled(ea_t ea, size_t sz) {
+	if (!in_data_seg(ea) || !is_loaded(ea + sz - 1)) return false;
+	for (size_t i = 0; i < sz; i++)
+		if (get_byte(ea + i) != 0) return false;
+	return true;
+}
+
+/*
+	The one zero-filled, descriptor-sized object get_plugin_descriptor returns:
+	storage that the init function fills in
+*/
 static ea_t zero_storage(ea_t gpd_ea, size_t sz) {
 	cfuncptr_t cf = rv::decompile_at(gpd_ea);
 	if (cf == nullptr) return BADADDR;
 
-	struct ref_finder_t : public ctree_visitor_t {
-		size_t sz;
-		std::set<ea_t> found;
+	struct ret_finder_t : public ctree_visitor_t {
+		std::map<int, ea_t> refs; // v = &obj
+		std::set<ea_t> objs;
+		std::set<int> vars;
 
-		ref_finder_t(size_t s) : ctree_visitor_t(CV_FAST), sz(s) {}
+		ret_finder_t() : ctree_visitor_t(CV_FAST) {}
+
+		static ea_t ref_obj(cexpr_t* e) {
+			e = strip_casts(e);
+			if (e->op != cot_ref) return BADADDR;
+			e = strip_casts(e->x);
+			return e->op == cot_obj ? e->obj_ea : BADADDR;
+		}
 
 		int idaapi visit_expr(cexpr_t* e) override {
-			if (e->op != cot_ref) return 0;
-			cexpr_t* x = strip_casts(e->x);
-			if (x->op != cot_obj || !in_data_seg(x->obj_ea)) return 0;
+			if (e->op != cot_asg) return 0;
+			cexpr_t* l = strip_casts(e->x);
+			if (l->op == cot_var) refs[l->v.idx] = ref_obj(e->y);
+			return 0;
+		}
 
-			const ea_t ea = x->obj_ea;
-			if (!is_loaded(ea) || !is_loaded(ea + sz - 1)) return 0;
-			for (size_t i = 0; i < sz; i++)
-				if (get_byte(ea + i) != 0) return 0;
-			found.insert(ea);
+		int idaapi visit_insn(cinsn_t* i) override {
+			if (i->op != cit_return) return 0;
+			cexpr_t* r = strip_casts(&i->creturn->expr);
+			if (r->op == cot_var) vars.insert(r->v.idx);
+			else if (const ea_t ea = ref_obj(r); ea != BADADDR)
+				objs.insert(ea);
 			return 0;
 		}
 	};
 
-	ref_finder_t rf(sz);
+	ret_finder_t rf;
 	rf.apply_to(&cf->body, nullptr);
-	return rf.found.size() == 1 ? *rf.found.begin() : BADADDR;
+
+	for (int v : rf.vars) {
+		if (auto it = rf.refs.find(v); it != rf.refs.end())
+			rf.objs.insert(it->second);
+	}
+
+	ea_t found = BADADDR;
+
+	for (ea_t ea : rf.objs) {
+		if (ea == BADADDR || !zero_filled(ea, sz)) continue;
+		if (found != BADADDR) return BADADDR; // ambiguous
+
+		found = ea;
+	}
+
+	return found;
 }
 
 std::vector<desc_t> find_descriptors(ea_t gpd_ea) {
