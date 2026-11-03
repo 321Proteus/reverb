@@ -61,9 +61,12 @@ inline bool fold_idx(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 	cexpr_t* n = strip_casts(e->y);
 	if (n->op != cot_num) return false;
 
+	// A local array decays to its own address, like a pointer
 	int sz;
-	const bool ok = e->x->type.is_array() ? fold_lvalue(e->x, alias, out, sz)
-										  : fold_addr(e->x, alias, out);
+	const bool member_array =
+		e->x->type.is_array() && strip_casts(e->x)->op != cot_var;
+	const bool ok = member_array ? fold_lvalue(e->x, alias, out, sz)
+								 : fold_addr(e->x, alias, out);
 	if (!ok) return false;
 
 	const int es = e->x->type.get_ptrarr_objsize();
