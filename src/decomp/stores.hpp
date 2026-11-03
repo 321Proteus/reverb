@@ -168,6 +168,19 @@ inline bool obj_is_array(const cexpr_t* e) {
 	return get_tinfo(&gt, e->obj_ea) && gt.is_array();
 }
 
+/*
+	Is the address taken in the function (lea, adrp + add) rather than its
+	value loaded? Hex-Rays prints both as a bare object when it guesses a
+	pointer type for an untyped item: lea rcx, off_X stores off_X
+*/
+inline bool addr_taken(ea_t obj, const cfunc_t* cf) {
+	func_t* pfn = get_func(cf->entry_ea);
+	xrefblk_t xb;
+	for (bool ok = xb.first_to(obj, XREF_DATA); ok; ok = xb.next_to())
+		if (xb.type == dr_O && func_contains(pfn, xb.from)) return true;
+	return false;
+}
+
 inline bool load_ptr_const(ea_t src, ea_t& out) {
 	if (!is_off0(get_flags(src))) return false; // not an offset item
 	if (get_item_size(src) < asize_t(ptr_size())) return false;
@@ -243,8 +256,9 @@ struct store_collector_t : public ctree_visitor_t {
 
 		case cot_obj: {
 			const ea_t obj = e->obj_ea;
-			// Function, code or arr decay
-			if (e->type.is_func() || is_code_addr(obj) || obj_is_array(e)) {
+			// Function, code, arr decay or an address taken with lea
+			if (e->type.is_func() || is_code_addr(obj) || obj_is_array(e) ||
+				addr_taken(obj, cf)) {
 				v.t = val_t::ADDR;
 				v.ea = e->obj_ea;
 			}
@@ -372,6 +386,47 @@ struct literal_collector_t : public ctree_visitor_t {
 		return 0;
 	}
 };
+
+// Extract <= 8 bytes located rel bytes into a NUM store
+inline uint64 slice_num(const store_t& s, int64 rel, int fsz) {
+	uint64 x = 0;
+	if (s.val.raw_len > 0) {
+		// Constant read from memory: slice the raw bytes (works for 16-byte
+		// stores)
+		for (int i = 0; i < fsz && rel + i < s.val.raw_len; i++)
+			x |= uint64(s.val.raw[rel + i]) << (8 * i);
+	} else {
+		// Immediate: at most 8 bytes in num; anything beyond is zero
+		// (e.g. *(_OWORD *)p = 0)
+		const int64 shift = rel * 8;
+		x = (shift < 64) ? (s.val.num >> shift) : 0;
+		if (fsz < 8) x &= (1ULL << (fsz * 8)) - 1;
+	}
+	return x;
+}
+
+/*
+	The constant last stored over [off, off + size) of var: a number sliced
+	out of a wider store, or an address stored exactly there. False when
+	nothing constant was stored
+*/
+inline bool stored_const(const std::vector<store_t>& stores, int var, int64 off,
+	int size, uint64& out) {
+	bool found = false;
+	for (const store_t& s : stores) {
+		if (s.loc.var != var || s.is_or || off < s.loc.off ||
+			off + size > s.loc.off + s.size)
+			continue;
+
+		found = true;
+		if (s.val.t == val_t::NUM) out = slice_num(s, off - s.loc.off, size);
+		else if (s.val.t == val_t::ADDR && s.loc.off == off && s.size == size)
+			out = s.val.ea;
+		else
+			found = false; // runtime value
+	}
+	return found;
+}
 
 // A string assembled from immediate stores into var, as left behind by an
 // inlined strcpy: *(_QWORD *)a5 = "..."; *((_BYTE *)a5 + 5) = 0;

@@ -41,24 +41,6 @@ qstring val_str(const val_t& v, const aeffect_hit_t& h) {
 	return s;
 }
 
-// Extract <= 8 bytes located rel bytes into a NUM store
-static uint64 slice_num(const store_t& s, int64 rel, int fsz) {
-	uint64 x = 0;
-	if (s.val.raw_len > 0) {
-		// Constant read from memory: slice the raw bytes (works for 16-byte
-		// stores)
-		for (int i = 0; i < fsz && rel + i < s.val.raw_len; i++)
-			x |= uint64(s.val.raw[rel + i]) << (8 * i);
-	} else {
-		// Immediate: at most 8 bytes in num; anything beyond is zero
-		// (e.g. *(_OWORD *)p = 0)
-		const int64 shift = rel * 8;
-		x = (shift < 64) ? (s.val.num >> shift) : 0;
-		if (fsz < 8) x &= (1ULL << (fsz * 8)) - 1;
-	}
-	return x;
-}
-
 void resolve_fields(const std::vector<aeffect_field_t>& fields,
 	aeffect_hit_t& h, const std::vector<store_t>& stores, bool is64) {
 
