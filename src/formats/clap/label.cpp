@@ -64,6 +64,21 @@ void label_fn(ea_t fn, const udm_t& m, const char* prefix, ea_t owner,
 		return;
 	}
 
+	// One function behind several members (a shared no-op): keep the first
+	// name, comment the other roles
+	qstring cur;
+	get_ea_name(&cur, fn);
+	if (cur != name && cur.starts_with(qstring(prefix) + "__")) {
+		qstring cmt, also;
+		get_func_cmt(&cmt, get_func(fn), true);
+		also.sprnt("also %s", name.c_str());
+		if (!strstr(cmt.c_str(), also.c_str())) {
+			if (!cmt.empty()) cmt += "\n";
+			set_func_cmt(get_func(fn), (cmt + also).c_str(), true);
+		}
+		return;
+	}
+
 	apply_tinfo(fn, m.type.get_pointed_object(), TINFO_DEFINITE);
 	if (!r.keep_name && !set_name(fn, name.c_str(), SN_NOWARN | SN_FORCE)) {
 		name.replace("::", "__");
