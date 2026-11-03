@@ -4,6 +4,8 @@
 #include "clap.hpp"
 #include "factory.hpp"
 #include "descriptor.hpp"
+#include "label.hpp"
+#include "plugin.hpp"
 #include "decomp/analysis.hpp"
 #include "db/members.hpp"
 #include <bytes.hpp>
@@ -13,12 +15,6 @@
 #include <typeinf.hpp>
 
 namespace rv::clap {
-
-struct fn_ref_t {
-	ea_t ea = BADADDR;
-	bool keep_name = false;
-	bool shared = false;
-};
 
 struct entry_info_t {
 	ea_t ea = BADADDR;
@@ -36,89 +32,6 @@ static ea_t find_entry() {
 		if (ea != BADADDR) return ea;
 	}
 	return BADADDR;
-}
-
-// Find nwind and exception table references
-static bool is_metadata_ref(ea_t from) {
-	segment_t* s = getseg(from);
-	if (!s) return false;
-
-	qstring n;
-	get_segm_name(&n, s);
-
-	static const char* const META_SECTIONS[] = {
-		// PE64 unwind
-		".pdata",
-		".xdata",
-		// ELF
-		".eh_frame",
-		".eh_frame_hdr",
-		".gcc_except_table",
-		// Mach O
-		"__unwind_info",
-		"__eh_frame",
-		"__gcc_except_tab",
-	};
-
-	for (const char* m : META_SECTIONS)
-		if (n == m) return true;
-	return false;
-}
-
-// Referenced from anywhere other than [owner, owner + owner_size)?
-static fn_ref_t classify_fn(ea_t fn, ea_t owner, size_t owner_size) {
-	fn_ref_t r;
-	r.ea = fn;
-	r.keep_name = !has_dummy_name(get_flags(fn));
-
-	func_t* f = get_func(fn);
-	if (f != nullptr && (f->flags & FUNC_LIB) != 0) r.shared = true;
-
-	xrefblk_t xb;
-	for (bool ok = xb.first_to(fn, XREF_ALL); ok && !r.shared;
-		ok = xb.next_to()) {
-		if (xb.iscode && xb.type == fl_F) continue;
-		if (xb.from >= owner && xb.from < owner + owner_size) continue;
-		if (!xb.iscode && is_metadata_ref(xb.from)) continue;
-		r.shared = true;
-	}
-	return r;
-}
-
-// Type the struct, then prototype and name every function member. Shared and
-// already-named functions are commented and skipped.
-static void label_fn_table(ea_t ea, const char* type, const char* prefix) {
-	tinfo_t tif;
-	if (!apply_type_at(ea, type, &tif)) return;
-
-	udt_type_data_t udt;
-	if (!tif.get_udt_details(&udt)) return;
-
-	for (const udm_t& m : udt) {
-		if (!m.type.is_funcptr()) continue;
-
-		const ea_t fn = read_ptr(ea + m.offset / 8);
-		if (rv::ensure_func(fn) == nullptr) continue;
-
-		const fn_ref_t r = classify_fn(fn, ea, tif.get_size());
-		qstring name;
-		name.sprnt("%s__%s", prefix, m.name.c_str());
-
-		if (r.shared) {
-			qstring cmt;
-			cmt.sprnt("CLAP: %s (shared function, left unnamed)", name.c_str());
-			set_func_cmt(get_func(fn), cmt.c_str(), true);
-			continue;
-		}
-
-		apply_tinfo(fn, m.type.get_pointed_object(), TINFO_DEFINITE);
-		if (!r.keep_name && !set_name(fn, name.c_str(), SN_NOWARN | SN_FORCE)) {
-			name.replace("::", "__");
-			set_name(fn, name.c_str(), SN_NOWARN | SN_FORCE);
-		}
-
-		mark_cfunc_dirty(fn);
-	}
 }
 
 // get_plugin_count usually just returns a constant
@@ -184,9 +97,12 @@ void scan() {
 		if (!plugin) continue;
 		for (const desc_t& d : descs)
 			label_descriptor(d);
+
 		check_plugin_count(f.ea, descs.size());
+		label_plugins(member_ptr(f.ea, f.kind->type, "create_plugin"), descs);
 		g_descs.insert(g_descs.end(), descs.begin(), descs.end());
 	}
+
 	mark_cfunc_dirty(gf_ea);
 }
 

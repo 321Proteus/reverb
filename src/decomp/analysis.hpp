@@ -28,6 +28,13 @@ ea_t resolve_thunk(ea_t ea, int max_hops = 3);
 // The constant of a function that decompiles to just `return <const>;`
 bool const_return(ea_t ea, uint64* out);
 
+/*
+	The callee of a function that only forwards: return f(...); or f(...);
+	return;. Sets indirect when the one call goes through a pointer (virtual
+	call, function pointer member)
+*/
+ea_t direct_tail_callee(ea_t ea, bool* indirect = nullptr);
+
 // Parse a C declaration and apply it as a user-defined (definite) type.
 bool apply_definite_proto(ea_t ea, const char* decl);
 

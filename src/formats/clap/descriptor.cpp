@@ -1,4 +1,5 @@
 #include "descriptor.hpp"
+#include "label.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "db/read.hpp"
@@ -114,13 +115,6 @@ std::vector<desc_t> find_descriptors(ea_t gpd_ea) {
 			if (get_dword(ea) == 1) try_at(ea); // clap_version.major
 	}
 	return out;
-}
-
-static qstring c_ident(const qstring& s) {
-	qstring r = s;
-	for (char& c : r)
-		if (uchar(c) >= 0x80 || !qisalnum(c)) c = '_';
-	return r;
 }
 
 static const char* or_none(const qstring& s) {

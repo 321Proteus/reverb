@@ -6,6 +6,10 @@ target_sources(reverb PRIVATE
     exts.inc
     factory.cpp
     factory.hpp
+    label.cpp
+    label.hpp
+    plugin.cpp
+    plugin.hpp
     scan.cpp
     types.h
 )

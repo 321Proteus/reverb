@@ -96,7 +96,8 @@ cfuncptr_t decompile_with_args(ea_t ea, int min_args, const tinfo_t* site) {
 	if (cf == nullptr || int(cf->argidx.size()) >= min_args) return cf;
 
 	tinfo_t ft;
-	if (site != nullptr) ft = site->is_funcptr() ? site->get_pointed_object() : *site;
+	if (site != nullptr)
+		ft = site->is_funcptr() ? site->get_pointed_object() : *site;
 
 	if (!ft.is_func() || ft.get_nargs() < min_args || is_userti(ea)) {
 		rv_log("%a: decompiled with %u args, %d needed", ea,
@@ -125,6 +126,41 @@ bool const_return(ea_t ea, uint64* out) {
 
 	*out = e->numval();
 	return true;
+}
+
+ea_t direct_tail_callee(ea_t ea, bool* indirect) {
+	if (indirect != nullptr) *indirect = false;
+
+	cfuncptr_t cf = decompile_at(ea);
+	if (cf == nullptr || cf->body.op != cit_block) return BADADDR;
+
+	cblock_t* b = cf->body.cblock;
+	if (b->empty() || b->size() > 2) return BADADDR;
+
+	cinsn_t& last = b->back();
+	if (b->size() == 2 &&
+		(last.op != cit_return || last.creturn->expr.op != cot_empty))
+		return BADADDR;
+
+	cinsn_t& i = b->front();
+	cexpr_t* e = nullptr;
+
+	if (i.op == cit_expr) {
+		e = i.cexpr;
+	} else if (i.op == cit_return && b->size() == 1) {
+		e = &i.creturn->expr;
+	}
+
+	e = strip_casts(e);
+	if (e == nullptr || e->op != cot_call) return BADADDR;
+
+	cexpr_t* fn = strip_casts(e->x);
+	if (fn->op != cot_obj || !is_code_addr(fn->obj_ea)) {
+		if (indirect != nullptr) *indirect = fn->op != cot_helper;
+		return BADADDR;
+	}
+
+	return resolve_thunk(fn->obj_ea);
 }
 
 bool apply_definite_proto(ea_t ea, const char* decl) {
