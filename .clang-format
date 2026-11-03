@@ -8,6 +8,7 @@ ContinuationIndentWidth: 4
 
 AlignAfterOpenBracket: DontAlign
 AlignArrayOfStructures: None
+Cpp11BracedListStyle: Block
 
 BreakBeforeBraces: Custom
 BraceWrapping:
