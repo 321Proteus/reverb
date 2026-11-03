@@ -214,6 +214,11 @@ static void label_extensions(ea_t ge) {
 	};
 	std::vector<ext_hit_t> hits;
 
+	if (uint64 n; rv::const_return(ge, &n) && n == 0) {
+		rv_log("get_extension at %a returns no extensions", ge);
+		return;
+	}
+
 	std::vector<rv::id_return_t> rets = rv::find_id_returns(ge, 1);
 	if (rets.empty()) {
 		const ea_t impl = rv::direct_tail_callee(ge);

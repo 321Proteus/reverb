@@ -5,11 +5,13 @@
 #include "decomp/ctree.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/stores.hpp"
+#include <map>
 
 namespace rv {
 
-// The comparison call in an if condition, and the branch that holds the match
-static cexpr_t* cmp_call(cexpr_t* c, bool& in_then) {
+// The compared value in an if condition (a call, or the result variable of
+// an inlined compare loop), and the branch that holds the match
+static cexpr_t* cmp_operand(cexpr_t* c, bool& in_then) {
 	c = strip_casts(c);
 	in_then = false;
 
@@ -22,22 +24,24 @@ static cexpr_t* cmp_call(cexpr_t* c, bool& in_then) {
 		in_then = c->op == cot_eq;
 		c = strip_casts(c->x);
 	}
-	return c->op == cot_call ? c : nullptr;
+	return c->op == cot_call || c->op == cot_var ? c : nullptr;
+}
+
+static bool literal_expr(cexpr_t* e, qstring& out) {
+	e = strip_casts(e);
+	if (e->op == cot_ref) e = strip_casts(e->x);
+
+	if (e->op == cot_str && e->string != nullptr) {
+		out = e->string;
+		return true;
+	}
+	return e->op == cot_obj && !is_code_addr(e->obj_ea) &&
+		   read_utf8(e->obj_ea, out) && !out.empty();
 }
 
 static bool literal_arg(cexpr_t* call, qstring& out) {
-	for (carg_t& a : *call->a) {
-		cexpr_t* e = strip_casts(&a);
-		if (e->op == cot_ref) e = strip_casts(e->x);
-
-		if (e->op == cot_str && e->string != nullptr) {
-			out = e->string;
-			return true;
-		}
-		if (e->op == cot_obj && !is_code_addr(e->obj_ea) &&
-			read_utf8(e->obj_ea, out) && !out.empty())
-			return true;
-	}
+	for (carg_t& a : *call->a)
+		if (literal_expr(&a, out)) return true;
 	return false;
 }
 
@@ -72,17 +76,104 @@ static bool is_compound(const cexpr_t* c) {
 	return c->op == cot_land || c->op == cot_lor;
 }
 
+struct label_finder_t : public ctree_visitor_t {
+	int num;
+	cinsn_t* found = nullptr;
+
+	label_finder_t(int n) : ctree_visitor_t(CV_FAST), num(n) {}
+
+	int idaapi visit_insn(cinsn_t* i) override {
+		if (i->label_num != num) return 0;
+		found = i;
+		return 1;
+	}
+};
+
+// Result variables of inlined compare loops, mapped to the literal:
+struct inline_cmp_finder_t : public ctree_visitor_t {
+	const std::set<int>& vars;
+	std::map<int, qstring> ids;
+
+	inline_cmp_finder_t(const std::set<int>& v)
+		: ctree_visitor_t(CV_FAST), vars(v) {}
+
+	struct loop_t : public ctree_visitor_t {
+		const std::set<int>& vars;
+		qstring lit;
+		std::set<int> assigned;
+
+		loop_t(const std::set<int>& v) : ctree_visitor_t(CV_FAST), vars(v) {}
+
+		int idaapi visit_expr(cexpr_t* e) override {
+			if (e->op == cot_sub) {
+				cexpr_t* y = strip_casts(e->y);
+				if (y->op == cot_var && vars.count(y->v.idx) != 0)
+					literal_expr(e->x, lit);
+			} else if (e->op == cot_asg) {
+				cexpr_t* l = strip_casts(e->x);
+				if (l->op == cot_var) assigned.insert(l->v.idx);
+			}
+			return 0;
+		}
+	};
+
+	int idaapi visit_insn(cinsn_t* i) override {
+		if (i->op != cit_do && i->op != cit_while && i->op != cit_for) return 0;
+
+		loop_t l(vars);
+		l.apply_to(i, nullptr);
+		if (l.lit.empty()) return 0;
+		for (int v : l.assigned)
+			ids[v] = l.lit;
+		return 0;
+	}
+};
+
 struct id_return_finder_t : public ctree_visitor_t {
+	cfunc_t* cf;
 	std::set<int> vars;
+	std::map<int, qstring> inline_ids;
 	std::vector<id_return_t> out;
 
-	id_return_finder_t(int var) : ctree_visitor_t(CV_FAST) { vars.insert(var); }
+	id_return_finder_t(cfunc_t* f, int var) : ctree_visitor_t(CV_FAST), cf(f) {
+		vars.insert(var);
+		inline_cmp_finder_t icf(vars);
+		icf.apply_to(&cf->body, nullptr);
+		inline_ids = std::move(icf.ids);
+	}
 
 	// cmp(id, "literal") in any of the accepted forms
 	bool id_cmp(cexpr_t* c, bool& in_then, qstring& id) {
-		cexpr_t* call = cmp_call(c, in_then);
-		return call != nullptr && arg_pos(call, vars) >= 0 &&
-			   literal_arg(call, id);
+		cexpr_t* x = cmp_operand(c, in_then);
+		if (x == nullptr) return false;
+		if (x->op == cot_var) {
+			auto it = inline_ids.find(x->v.idx);
+			if (it == inline_ids.end()) return false;
+			id = it->second;
+			return true;
+		}
+		return arg_pos(x, vars) >= 0 && literal_arg(x, id);
+	}
+
+	/*
+		The object a matched branch returns. A goto is followed to its label,
+		and a branch ending in if (other) return x; makes the match
+		conditional
+	*/
+	ea_t branch_obj(cinsn_t* i, bool& cond, int depth = 0) {
+		i = last_stmt(i);
+		if (i == nullptr || depth > 4) return BADADDR;
+
+		if (i->op == cit_goto) {
+			label_finder_t lf(i->cgoto->label_num);
+			lf.apply_to(&cf->body, nullptr);
+			return branch_obj(lf.found, cond, depth + 1);
+		}
+		if (i->op == cit_if && i->cif->ielse == nullptr) {
+			cond = true;
+			return branch_obj(i->cif->ithen, cond, depth + 1);
+		}
+		return returned_obj(i);
 	}
 
 	// Ids of a compound condition that make it true, so they match in the
@@ -134,10 +225,13 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return true;
 	}
 
-	void add(std::vector<id_return_t>& ids, ea_t ea) {
+	void add(std::vector<id_return_t>& ids, cinsn_t* branch) {
+		bool cond = false;
+		const ea_t ea = branch_obj(branch, cond);
 		if (ea == BADADDR) return;
 		for (id_return_t& r : ids) {
 			r.ea = ea;
+			r.conditional |= cond;
 			out.push_back(r);
 		}
 	}
@@ -146,7 +240,7 @@ struct id_return_finder_t : public ctree_visitor_t {
 		std::vector<id_return_t> ids;
 		bool in_then;
 		if (id_check(i, in_then, ids)) {
-			add(ids, returned_obj(in_then ? i->cif->ithen : i->cif->ielse));
+			add(ids, in_then ? i->cif->ithen : i->cif->ielse);
 			return 0;
 		}
 		if (i->op != cit_block) return 0;
@@ -159,7 +253,7 @@ struct id_return_finder_t : public ctree_visitor_t {
 
 			if (id_check(&*it, in_then, ids) && !in_then &&
 				it->cif->ielse == nullptr && returns_null(it->cif->ithen))
-				add(ids, returned_obj(&*next));
+				add(ids, &*next);
 		}
 		return 0;
 	}
@@ -169,7 +263,7 @@ std::vector<id_return_t> find_id_returns(ea_t fn_ea, int arg) {
 	cfuncptr_t cf = decompile_at(fn_ea);
 	if (cf == nullptr || arg >= int(cf->argidx.size())) return {};
 
-	id_return_finder_t f(cf->argidx[arg]);
+	id_return_finder_t f(cf, cf->argidx[arg]);
 	f.apply_to(&cf->body, nullptr);
 	return f.out;
 }

@@ -9,7 +9,7 @@ namespace rv {
 // it matches
 struct id_return_t {
 	qstring id;
-	ea_t ea = BADADDR; // returned object
+	ea_t ea = BADADDR;		  // returned object
 	bool conditional = false; // !cmp(id, x) && something_else()
 };
 
@@ -18,8 +18,10 @@ struct id_return_t {
 	not checked, so strcmp, memcmp and inlined helpers all count. Accepts
 	cmp() == 0 and !cmp() (the then-branch), cmp() != 0 and a bare cmp() (the
 	else-branch, or the next statement when there is no else and the
-	then-branch returns null). In A || B every id matches the then-branch,
-	in A && B the id is conditional. The match must end in a return
+	then-branch returns null). Inlined compare loops count too, through
+	their result variable. In A || B every id matches the then-branch, in
+	A && B the id is conditional. The match must end in a return, possibly
+	behind a goto or a nested if (other) return x; (also conditional)
 */
 std::vector<id_return_t> find_id_returns(ea_t fn_ea, int arg = 0);
 
