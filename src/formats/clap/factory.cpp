@@ -10,6 +10,7 @@
 #include "decomp/stores.hpp"
 #include "patterns/id_returns.hpp"
 #include <algorithm>
+#include <string>
 #include "exts.hpp"
 
 namespace rv::clap {
@@ -66,6 +67,53 @@ static const id_type_t* factory_id_at(ea_t ea) {
 	return best;
 }
 
+static constexpr size_t MIN_FRAGMENT = 4;
+static constexpr size_t MAX_FRAGMENT = 16;
+
+// id with its NUL, which SIMD compares check too
+static std::string id_bytes(const id_type_t& k) {
+	return std::string(k.id, strlen(k.id) + 1);
+}
+
+// Up to 16 bytes of text at ea, through the first NUL, that fit a known id
+static bool read_fragment(ea_t ea, std::string& out) {
+	char buf[MAX_FRAGMENT];
+	if (get_bytes(buf, sizeof(buf), ea) != ssize_t(sizeof(buf))) return false;
+
+	const char* nul = static_cast<const char*>(memchr(buf, 0, sizeof(buf)));
+	out.assign(buf, nul != nullptr ? nul - buf + 1 : sizeof(buf));
+	if (out.size() < MIN_FRAGMENT ||
+		!is_text(qstring(buf, out.size() - (nul != nullptr))))
+		return false;
+
+	for (const id_type_t& k : CLAP_FACTORIES)
+		if (id_bytes(k).find(out) != std::string::npos) return true;
+	return false;
+}
+
+/*
+	The id that pieces compared with SIMD loads come from.
+	A _COMPAT id and its stable id count as one
+*/
+static const id_type_t* fragment_id(const std::vector<std::string>& frags) {
+	const id_type_t* found = nullptr;
+	for (const id_type_t& k : CLAP_FACTORIES) {
+		const std::string id = id_bytes(k);
+		size_t covered = 0;
+		bool fits = true;
+		for (const std::string& f : frags) {
+			fits = fits && id.find(f) != std::string::npos;
+			covered += f.size();
+		}
+		if (!fits || covered < id.size()) continue;
+
+		if (found != nullptr && strcmp(found->type, k.type) != 0)
+			return nullptr; // ambiguous
+		found = found == nullptr ? &k : prefer(found, &k);
+	}
+	return found;
+}
+
 static const id_type_t* factory_by_name(const char* name) {
 	for (const id_type_t& k : CLAP_FACTORIES)
 		if (strcmp(k.name, name) == 0) return &k;
@@ -83,6 +131,7 @@ static std::vector<factory_hit_t> xref_factories(ea_t gf_ea) {
 
 	std::vector<const id_type_t*> ids; // one per factory type
 	std::vector<ea_t> tables;
+	std::vector<std::string> fragments;
 	std::set<ea_t> seen;
 
 	rv_fii_t fii;
@@ -103,9 +152,21 @@ static std::vector<factory_hit_t> xref_factories(ea_t gf_ea) {
 					*it = prefer(*it, k);
 				continue;
 			}
+			if (std::string f; read_fragment(t, f)) {
+				fragments.push_back(f);
+				continue;
+			}
 			// one hop through a GOT slot (exported factory in PIC)
 			if (ea_t p; !is_fn_table(t, probe) && load_ptr_const(t, p)) t = p;
 			if (is_fn_table(t, probe)) tables.push_back(t);
+		}
+	}
+
+	if (ids.empty() && !fragments.empty()) {
+		if (const id_type_t* k = fragment_id(fragments)) {
+			rv_log("get_factory at %a: %s matched from %u id fragment(s)",
+				gf_ea, k->name, unsigned(fragments.size()));
+			ids.push_back(k);
 		}
 	}
 
