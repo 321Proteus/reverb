@@ -35,6 +35,14 @@ bool is_fn_table(ea_t ea, const tinfo_t& tif) {
 	return fns > 0;
 }
 
+bool resolve_table(ea_t& ea, const tinfo_t& tif) {
+	if (is_fn_table(ea, tif)) return true;
+	ea_t p;
+	if (!load_ptr_const(ea, p) || !is_fn_table(p, tif)) return false;
+	ea = p;
+	return true;
+}
+
 static bool id_char(int c) {
 	return qisalnum(c) || c == '.' || c == '-' || c == '_' || c == '/';
 }
@@ -58,23 +66,10 @@ static const id_type_t* factory_id_at(ea_t ea) {
 	return best;
 }
 
-static const id_type_t* factory_by_id(const char* id) {
-	for (const id_type_t& k : CLAP_FACTORIES)
-		if (strcmp(k.id, id) == 0) return &k;
-	return nullptr;
-}
-
 static const id_type_t* factory_by_name(const char* name) {
 	for (const id_type_t& k : CLAP_FACTORIES)
 		if (strcmp(k.name, name) == 0) return &k;
 	return nullptr;
-}
-
-// A _COMPAT id and its stable id name the same struct, prefer the stable one
-static const id_type_t* prefer(const id_type_t* a, const id_type_t* b) {
-	const bool a_compat = qstring(a->name).ends_with("_COMPAT");
-	const bool b_compat = qstring(b->name).ends_with("_COMPAT");
-	return a_compat && !b_compat ? b : a;
 }
 
 // Fallback when the ctree has no id checks: pair the ids and factory structs
@@ -137,7 +132,7 @@ std::vector<factory_hit_t> find_factories(ea_t gf_ea) {
 	std::vector<factory_hit_t> hits;
 	for (const rv::id_return_t& r : rets) {
 
-		const id_type_t* kind = factory_by_id(r.id.c_str());
+		const id_type_t* kind = by_id(CLAP_FACTORIES, r.id.c_str());
 		if (kind == nullptr) {
 			rv_log("Unknown CLAP factory \"%s\" at %a", r.id.c_str(), r.ea);
 
@@ -151,9 +146,7 @@ std::vector<factory_hit_t> find_factories(ea_t gf_ea) {
 		if (!tif.get_named_type(nullptr, kind->type)) continue;
 
 		ea_t ea = r.ea;
-		if (ea_t p; !is_fn_table(ea, tif) && load_ptr_const(ea, p)) ea = p;
-
-		if (!is_fn_table(ea, tif)) {
+		if (!resolve_table(ea, tif)) {
 			rv_log("CLAP factory \"%s\" at %a is not a %s", r.id.c_str(), r.ea,
 				kind->type);
 			continue;
