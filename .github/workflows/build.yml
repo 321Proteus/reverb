@@ -20,10 +20,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ida: ${{ steps.v.outputs.ida }}
+      matrix: ${{ steps.v.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
       - id: v
-        run: echo "ida=$(jq -c '.plugin.idaVersions' ida-plugin.json)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "ida=$(jq -c '.plugin.idaVersions' ida-plugin.json)" >> "$GITHUB_OUTPUT"
+          # macOS runners are expensive: only build them for the latest SDK
+          matrix="$(jq -c '
+            (.plugin.idaVersions | max_by(split(".") | map(tonumber))) as $latest
+            | [ .plugin.idaVersions[] as $ida
+                | ({runner: "ubuntu-latest",  name: "linux"},
+                   {runner: "windows-latest", name: "windows"},
+                   (select($ida == $latest) | {runner: "macos-latest",   name: "macos-arm64"}),
+                   (select($ida == $latest) | {runner: "macos-15-intel", name: "macos-x64"}))
+                  as $os
+                | {ida: $ida, os: $os} ]
+            | {include: .}' ida-plugin.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   build:
     needs: versions
@@ -31,13 +45,7 @@ jobs:
     runs-on: ${{ matrix.os.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        ida: ${{ fromJSON(needs.versions.outputs.ida) }}
-        os:
-          - { runner: ubuntu-latest,  name: linux }
-          - { runner: windows-latest, name: windows }
-          - { runner: macos-latest,   name: macos-arm64 }
-          - { runner: macos-15-intel, name: macos-x64 }
+      matrix: ${{ fromJSON(needs.versions.outputs.matrix) }}
 
     steps:
       - name: Checkout
@@ -130,10 +138,12 @@ jobs:
           mkdir -p pkg
           cp -R "${p}-linux/." pkg/
           cp "${p}-windows/reverb.dll" pkg/
-          lipo -create \
-            "${p}-macos-arm64/reverb.dylib" \
-            "${p}-macos-x64/reverb.dylib" \
-            -output pkg/reverb.dylib
+          if [ -d "${p}-macos-arm64" ]; then
+            lipo -create \
+              "${p}-macos-arm64/reverb.dylib" \
+              "${p}-macos-x64/reverb.dylib" \
+              -output pkg/reverb.dylib
+          fi
           (cd pkg && zip -r "../reverb-ida${v}.zip" .)
 
       - name: Upload release assets
