@@ -2,10 +2,10 @@
 #include <funcs.hpp>
 #include <hexrays.hpp>
 #include <name.hpp>
+#include "core/log.hpp"
 #include "vst3.hpp"
 #include "finders.hpp"
-#include "common/analysis.hpp"
-#include "util.hpp"
+#include "decomp/analysis.hpp"
 
 static bool may_be_factory(ea_t vt) {
 	rv::rtti::class_info ci;

@@ -1,6 +1,6 @@
 #pragma once
-#include "common/vtable.hpp"
-#include "util.hpp"
+#include "decomp/ctree.hpp"
+#include "cxx/vtable.hpp"
 #include <hexrays.hpp>
 
 struct global_assign_finder_t : public ctree_visitor_t {

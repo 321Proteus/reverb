@@ -1,5 +1,5 @@
 #pragma once
-#include "common/framework.hpp"
+#include "frameworks/framework.hpp"
 
 namespace rv::dpf {
 extern const FrameworkModule module;

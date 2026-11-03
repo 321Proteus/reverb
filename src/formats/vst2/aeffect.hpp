@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common/stores.hpp"
+#include "decomp/stores.hpp"
 #include <hexrays.hpp>
 #include <map>
 #include <pro.h>

@@ -1,14 +1,16 @@
-#include "common/analysis.hpp"
-#include "common/stores.hpp"
-#include "vst2.hpp"
 #include "aeffect.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "db/read.hpp"
+#include "decomp/analysis.hpp"
+#include "decomp/stores.hpp"
+#include "vst2.hpp"
 #include <cstring>
 #include <hexrays.hpp>
 #include <ida.hpp>
 #include <llong.hpp>
 #include <pro.h>
 #include <segment.hpp>
-#include <util.hpp>
 #include <vector>
 
 namespace rv::vst2 {
@@ -37,24 +39,6 @@ qstring val_str(const val_t& v, const aeffect_hit_t& h) {
 		break;
 	}
 	return s;
-}
-
-// Extract <= 8 bytes located rel bytes into a NUM store
-static uint64 slice_num(const store_t& s, int64 rel, int fsz) {
-	uint64 x = 0;
-	if (s.val.raw_len > 0) {
-		// Constant read from memory: slice the raw bytes (works for 16-byte
-		// stores)
-		for (int i = 0; i < fsz && rel + i < s.val.raw_len; i++)
-			x |= uint64(s.val.raw[rel + i]) << (8 * i);
-	} else {
-		// Immediate: at most 8 bytes in num; anything beyond is zero
-		// (e.g. *(_OWORD *)p = 0)
-		const int64 shift = rel * 8;
-		x = (shift < 64) ? (s.val.num >> shift) : 0;
-		if (fsz < 8) x &= (1ULL << (fsz * 8)) - 1;
-	}
-	return x;
 }
 
 void resolve_fields(const std::vector<aeffect_field_t>& fields,

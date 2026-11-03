@@ -1,10 +1,10 @@
-#include "common/framework.hpp"
-#include "common/refs.hpp"
+#include "core/log.hpp"
+#include "db/segments.hpp"
+#include "framework.hpp"
 #include "frameworks/dpf/dpf.hpp"
 #include "frameworks/iplug2/iplug2.hpp"
 #include "frameworks/juce/juce.hpp"
-#include "reverb.hpp"
-#include "util.hpp"
+#include "core/reverb.hpp"
 #include <algorithm>
 #include <bytes.hpp>
 #include <map>

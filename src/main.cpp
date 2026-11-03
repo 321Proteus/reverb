@@ -1,5 +1,6 @@
-#include "common/format.hpp"
-#include "reverb.hpp"
+#include "core/log.hpp"
+#include "formats/format.hpp"
+#include "core/reverb.hpp"
 #include <auto.hpp>
 #include <cstdio>
 #include <hexrays.hpp>
@@ -13,9 +14,8 @@
 #include <typeinf.hpp>
 #include "detect.hpp"
 #include "state.hpp"
-#include "types_embed.hpp"
-#include "util.hpp"
-#include "common/framework.hpp"
+#include "formats/types_embed.hpp"
+#include "frameworks/framework.hpp"
 #include "formats/vst2/vst2.hpp"
 
 // A format probe may have loaded the types before detection ends

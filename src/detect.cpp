@@ -1,10 +1,14 @@
 #include "detect.hpp"
-#include "reverb.hpp"
+#include "core/reverb.hpp"
 #include <hexrays.hpp>
 #include <pro.h>
 #include <vector>
-#include "util.hpp"
 #include <typeinf.hpp>
+
+// Source: https://stackoverflow.com/questions/16388510
+static constexpr unsigned int str_cth(const char* str, int h = 0) {
+	return !str[h] ? 5381 : (str_cth(str, h + 1) * 33) ^ str[h];
+}
 
 static const char* lstrip(const char* s) { return (s[0] == '_') ? s + 1 : s; }
 
