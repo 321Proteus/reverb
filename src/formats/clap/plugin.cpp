@@ -86,7 +86,7 @@ static void add_hit(std::vector<plugin_hit_t>& out, plugin_hit_t&& h) {
 	if (it == out.end()) out.push_back(std::move(h));
 
 	else if (it->desc == nullptr)
-		it->desc = it->desc;
+		h.desc = it->desc;
 }
 
 /*
