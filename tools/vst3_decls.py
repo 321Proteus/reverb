@@ -42,7 +42,6 @@ from declgen import (BUILTIN, TARGETS, GenError, TypeRenderer, anon_record,
                      fail, field_layout, kw, with_const)
 
 HERE = Path(__file__).resolve().parent
-SCRIPT = "gen_vst3_types.py"  # name recorded in the committed outputs
 SHIMS = HERE / "vst3_shims"
 
 # Utility headers with C++ helpers (strings, smart pointers, templates) and
@@ -600,7 +599,7 @@ def main():
         source = f"steinbergmedia/vst3_pluginterfaces @ {rev} (MIT)"
         text = "\n\n".join([
             declgen.generated_header(
-                SCRIPT, source, "__RV_API is replaced at load time: "
+                "vst3_Decls.py", source, "__RV_API is replaced at load time: "
                 "__stdcall on 32-bit Windows, empty elsewhere."),
             "\n".join(body),
             tresult_enums(sdk),
@@ -615,7 +614,7 @@ def main():
         iids = collect_iids(sdk, model)
         iid_text = (
             declgen.generated_header(
-                SCRIPT, source,
+                "vst3_decls.py", source,
                 "RV_IID(Name, l1, l2, l3, l4): words as in DECLARE_CLASS_IID.")
             + "\n" + "".join(f"RV_IID({n}, 0x{a:08X}, 0x{b:08X}, 0x{c:08X}, "
                       f"0x{d:08X})\n" for n, (a, b, c, d) in iids))
