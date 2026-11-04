@@ -66,7 +66,14 @@ def parse(index, src, name, target, includes, lang_args):
     args = [f"--target={target}", "-nostdlibinc", "-Wno-pragma-pack",
             f"-resource-dir={resource_dir()}"] + \
            [f"-I{i}" for i in includes] + list(lang_args)
-    tu = index.parse(name, args=args, unsaved_files=[(name, src)],
+    # A newer clang's stdint.h needs __INTn_C predefines that older pip
+    # libclang lacks; define them if missing.
+    shim = "".join(
+        f"#ifndef __{p}INT{n}_C\n#define __{p}INT{n}_C(c) {"c##"+suf if suf else "c"}\n#endif\n"
+        for p, n, suf in (("", 8, ""), ("", 16, ""), ("", 32, ""),
+                          ("", 64, "LL"), ("U", 8, ""), ("U", 16, ""),
+                          ("U", 32, "U"), ("U", 64, "ULL")))
+    tu = index.parse(name, args=args, unsaved_files=[(name, shim + src)],
                      options=ci.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES)
     errs = [d for d in tu.diagnostics if d.severity >= ci.Diagnostic.Error]
     if errs:
