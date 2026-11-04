@@ -7,11 +7,11 @@ outputs. The plugin build only embeds the generated files.
 
     pip install libclang
     git clone https://github.com/steinbergmedia/vst3_pluginterfaces pluginterfaces
-    python3 tools/vst3_types.py --sdk . \
+    python3 tools/vst3_types.py --sdk pluginterfaces \
         --types src/VST3/types.hpp --iids src/VST3/iids.inc
 
---sdk is the directory that *contains* pluginterfaces/ (the SDK's own include
-root). Outputs:
+--sdk is the pluginterfaces/ directory itself (its parent is used as the
+include root, so the directory must be named pluginterfaces). Outputs:
 
   types.hpp   flat C declarations: SDK typedefs, enums, data structs, and for
               every interface X a `struct X { X_vtbl *__vftable; }` plus an
@@ -567,12 +567,14 @@ def verify(index, sdk, umb, text, target, model):
 # ---------------------------------------------------------------- main
 
 def main():
-    args = declgen.arg_parser(__doc__, "directory containing pluginterfaces/",
+    args = declgen.arg_parser(__doc__, "the pluginterfaces/ directory",
                               "types", "iids").parse_args()
 
-    sdk = args.sdk.resolve()
-    if not (sdk / "pluginterfaces/base/funknown.h").exists():
-        sys.exit(f"{sdk}/pluginterfaces/base/funknown.h not found")
+    pif = args.sdk.resolve()
+    if pif.name != "pluginterfaces" or not (pif / "base/funknown.h").exists():
+        sys.exit(f"{pif}: not a pluginterfaces/ directory "
+                 "(base/funknown.h not found)")
+    sdk = pif.parent  # include root: headers use "pluginterfaces/..." paths
 
     index = ci.Index.create()
     umb = umbrella(sdk)
