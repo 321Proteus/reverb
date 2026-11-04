@@ -1,0 +1,32 @@
+name: format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+      - name: Format sources
+        run: |
+          git ls-files '*.c' '*.cc' '*.cpp' '*.h' '*.hh' '*.hpp' \
+            ':!:src/formats/*/types.h' \
+            | xargs -r uvx clang-format@23.1.4 -i
+      - name: Fail on differences
+        run: |
+          git diff --exit-code || {
+            echo "::error::Not clang-format clean. Run clang-format (23.1.4) locally."
+            exit 1
+          }
