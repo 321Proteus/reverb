@@ -78,8 +78,7 @@ bool obj_tracker_t::vptr_of(cexpr_t* e, sval_t& off) const {
 		if (e->m != 0 && vptrs.count(sval_t(e->m)) == 0) return false;
 		off = sval_t(e->m);
 		return true;
-	default:
-		return false;
+	default: return false;
 	}
 }
 
@@ -99,20 +98,15 @@ bool obj_tracker_t::is_part(cexpr_t* e) const {
 	};
 
 	switch (e->op) {
-	case cot_var:
-		return parts.count(e->v.idx) != 0;
-	case cot_memptr:
-		return e->m != 0 && rooted(e->x);
-	case cot_ptr:
-		return field(e->x);
-	case cot_add:
-		return field(e);
-	case cot_ref: {
+	case cot_var:	 return parts.count(e->v.idx) != 0;
+	case cot_memptr: return e->m != 0 && rooted(e->x);
+	case cot_ptr:	 return field(e->x);
+	case cot_add:	 return field(e);
+	case cot_ref:	 {
 		cexpr_t* m = strip_casts(e->x);
 		return m->op == cot_memptr && rooted(m->x);
 	}
-	default:
-		return false;
+	default: return false;
 	}
 }
 
@@ -125,7 +119,8 @@ void obj_tracker_t::absorb(cexpr_t* asg) {
 
 	auto set_off = [&](sval_t off) {
 		if (off != 0) var_vptr[v] = off;
-		else var_vptr.erase(v);
+		else
+			var_vptr.erase(v);
 	};
 
 	int slot;
@@ -141,7 +136,8 @@ void obj_tracker_t::absorb(cexpr_t* asg) {
 		parts.insert(v);
 }
 
-bool obj_tracker_t::vcall_slot(cexpr_t* callee, int& slot, sval_t* vptr_off) const {
+bool obj_tracker_t::vcall_slot(
+	cexpr_t* callee, int& slot, sval_t* vptr_off) const {
 	cexpr_t* e = strip_casts(callee);
 	cexpr_t* vt = nullptr;
 	int64 off = 0;
@@ -190,8 +186,7 @@ bool obj_tracker_t::vcall_slot(cexpr_t* callee, int& slot, sval_t* vptr_off) con
 		break;
 	}
 
-	default:
-		return false;
+	default: return false;
 	}
 
 	sval_t k;

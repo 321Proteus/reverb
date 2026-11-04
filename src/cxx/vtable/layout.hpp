@@ -44,7 +44,8 @@ int vtable_run_length(ea_t vt, int max_entries = 1024);
 // fn(const udm_t&, size_t byte_offset) for every slot of a _vtbl type, base
 // classes flattened
 template <class F>
-void for_each_member(const tinfo_t& vtbl, F&& fn, size_t base = 0, int depth = 0) {
+void for_each_member(
+	const tinfo_t& vtbl, F&& fn, size_t base = 0, int depth = 0) {
 	udt_type_data_t udt;
 	if (depth > 16 || !vtbl.get_udt_details(&udt)) return;
 
@@ -53,7 +54,8 @@ void for_each_member(const tinfo_t& vtbl, F&& fn, size_t base = 0, int depth = 0
 
 		const size_t off = base + size_t(m.offset / 8);
 		if (m.is_baseclass()) for_each_member(m.type, fn, off, depth + 1);
-		else fn(m, off);
+		else
+			fn(m, off);
 	}
 }
 

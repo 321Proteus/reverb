@@ -50,8 +50,8 @@ const class_node* class_hierarchy::find_class(const qstring& name) const {
 std::vector<const class_node*> class_hierarchy::derived_of(
 	ea_t ti, bool recursive) const {
 	std::vector<const class_node*> out;
-	std::set<ea_t> seen{ti};
-	std::vector<ea_t> work{ti};
+	std::set<ea_t> seen{ ti };
+	std::vector<ea_t> work{ ti };
 
 	while (!work.empty()) {
 		const class_node* n = find(work.back());

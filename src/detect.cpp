@@ -16,6 +16,7 @@ rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
 
 	rv::InterfaceSet found;
 
+	// clang-format off
 	for (const qstring& ex : exports) {
 		switch (str_cth(lstrip(ex.c_str()))) {
 
@@ -34,8 +35,10 @@ rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
 		case str_cth("AUPluginInstanceEntry"):
 			found.add(rv::Interface::AU);
 			break;
+
 		}
 	}
+	// clang-format on
 
 	return found;
 }

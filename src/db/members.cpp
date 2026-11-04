@@ -60,19 +60,10 @@ bool member_value(
 
 	const ea_t ea = base + off;
 	switch (t.get_size()) {
-	case 1:
-		*out = get_byte(ea);
-		return true;
-	case 2:
-		*out = get_word(ea);
-		return true;
-	case 4:
-		*out = get_dword(ea);
-		return true;
-	case 8:
-		*out = get_qword(ea);
-		return true;
-	default:
-		return false;
+	case 1:	 *out = get_byte(ea); return true;
+	case 2:	 *out = get_word(ea); return true;
+	case 4:	 *out = get_dword(ea); return true;
+	case 8:	 *out = get_qword(ea); return true;
+	default: return false;
 	}
 }

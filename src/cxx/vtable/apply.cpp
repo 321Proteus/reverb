@@ -109,23 +109,12 @@ label_stats apply(const model& m, const label_policy& p) {
 	for (const auto& [f, fr] : m.funcs) {
 
 		switch (fr.kind) {
-		case func_kind::PURECALL:
-			st.purecall++;
-			continue;
-		case func_kind::SKIP:
-			st.skipped++;
-			continue;
-		case func_kind::INHERITED:
-			st.inherited++;
-			break;
-		case func_kind::FOLDED:
-			st.folded++;
-			break;
-		case func_kind::THUNK:
-			st.thunks++;
-			break;
-		default:
-			break;
+		case func_kind::PURECALL:  st.purecall++; continue;
+		case func_kind::SKIP:	   st.skipped++; continue;
+		case func_kind::INHERITED: st.inherited++; break;
+		case func_kind::FOLDED:	   st.folded++; break;
+		case func_kind::THUNK:	   st.thunks++; break;
+		default:				   break;
 		}
 
 		const slot_rec* s = fr.rec >= 0 ? &m.slots[fr.rec] : nullptr;

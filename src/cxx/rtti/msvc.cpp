@@ -179,7 +179,7 @@ void collect(const ref_index&, std::vector<ea_t>& out) {
 	const int flags = BIN_SEARCH_FORWARD | BIN_SEARCH_CASE |
 					  BIN_SEARCH_NOBREAK | BIN_SEARCH_NOSHOW;
 
-	for (const char* lit : {"\".?AV\"", "\".?AU\""}) {
+	for (const char* lit : { "\".?AV\"", "\".?AU\"" }) {
 		compiled_binpat_vec_t bp;
 		qstring err;
 		if (!parse_binpat_str(

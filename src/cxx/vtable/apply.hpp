@@ -7,10 +7,12 @@ namespace rv::vtbl {
 
 struct label_policy {
 	bool rename = true, set_prototypes = true, comment_shared = true;
-	bool use_shifted_this = false; // __shifted(Class, off) for secondary vtables
+	// __shifted(Class, off) for secondary vtables
+	bool use_shifted_this = false;
 };
 
 // Changes made (except the per-kind function counts)
+// clang-format off
 struct label_stats {
 	int vtables = 0,
 		named = 0,
@@ -22,10 +24,11 @@ struct label_stats {
 		skipped = 0,
 		name_taken = 0;
 };
+// clang-format on
 
 /*
-	Types each vtable as its def (interface _vtbl), then names and prototypes the
-	slot functions (dummy/non-user-defined only)
+	Types each vtable as its def (interface _vtbl), then names and prototypes
+   the slot functions (dummy/non-user-defined only)
 */
 label_stats apply(const model& m, const label_policy& p = {});
 

@@ -22,14 +22,10 @@ static constexpr int FW_THRESHOLD = 10;
 
 const FrameworkModule* get_framework_module(Framework fw) {
 	switch (fw) {
-	case Framework::JUCE:
-		return &juce::module;
-	case Framework::IPLUG2:
-		return &iplug2::module;
-	case Framework::DPF:
-		return &dpf::module;
-	default:
-		return nullptr;
+	case Framework::JUCE:	return &juce::module;
+	case Framework::IPLUG2: return &iplug2::module;
+	case Framework::DPF:	return &dpf::module;
+	default:				return nullptr;
 	}
 }
 
@@ -81,7 +77,7 @@ static std::vector<signal_hit_t> find_fw_signals() {
 			ea_t ea = find_fw_string(fwp.pattern);
 			if (ea != BADADDR) {
 				rv_log("Framework pattern \"%s\" at %a", fwp.pattern, ea);
-				hits.push_back({&fwp, ea});
+				hits.push_back({ &fwp, ea });
 			}
 		}
 	}

@@ -13,14 +13,16 @@ namespace rv::vtbl {
 
 constexpr uint16 R_CX = 1, R_SP = 4, R_BP = 5, R_DI = 7;
 
-static bool is_reg(const op_t& o, uint16 r) { return o.type == o_reg && o.reg == r; }
+static bool is_reg(const op_t& o, uint16 r) {
+	return o.type == o_reg && o.reg == r;
+}
 
 // Immediate or displacement as by operand size
 static sval_t signed_val(const op_t& o, uval_t v) {
 	switch (get_dtype_size(o.dtype)) {
-	case 1: return sval_t(int8(v));
-	case 2: return sval_t(int16(v));
-	case 4: return sval_t(int32(v));
+	case 1:	 return sval_t(int8(v));
+	case 2:	 return sval_t(int16(v));
+	case 4:	 return sval_t(int32(v));
 	default: return sval_t(v);
 	}
 }
@@ -32,10 +34,15 @@ static sval_t signed_val(const op_t& o, uval_t v) {
 */
 static bool this_adjust(const insn_t& in, bool frame, sval_t& delta) {
 	const bool x64 = inf_is_64bit();
-	auto this_reg = [&](const op_t& o) { return is_reg(o, R_CX) || (x64 && is_reg(o, R_DI)); };
+	auto this_reg = [&](const op_t& o) {
+		return is_reg(o, R_CX) || (x64 && is_reg(o, R_DI));
+	};
+
 	auto stack_this = [&](const op_t& o) {
 		if (x64 || o.type != o_displ) return false;
+
 		if (o.specflag1 && ((o.specflag2 >> 3) & 7) != 4) return false;
+
 		const uint16 base = o.specflag1 ? (o.specflag2 & 7) : o.phrase;
 		return (base == R_SP && o.addr == (frame ? 8 : 4)) ||
 			   (frame && base == R_BP && o.addr == 8);
@@ -46,15 +53,19 @@ static bool this_adjust(const insn_t& in, bool frame, sval_t& delta) {
 
 	if ((in.itype == NN_add || in.itype == NN_sub) && s.type == o_imm &&
 		(this_reg(d) || stack_this(d))) {
+
 		const sval_t v = signed_val(s, s.value);
 		delta = in.itype == NN_add ? v : -v;
+
 		return true;
 	}
-	if (in.itype == NN_lea && this_reg(d) && s.type == o_displ && !s.specflag1 &&
-		s.phrase == d.reg) {
+
+	if (in.itype == NN_lea && this_reg(d) && s.type == o_displ &&
+		!s.specflag1 && s.phrase == d.reg) {
 		delta = x64 ? sval_t(s.addr) : sval_t(int32(s.addr));
 		return true;
 	}
+
 	return false;
 }
 
@@ -70,15 +81,21 @@ bool adjustor_thunk(ea_t ea, ea_t* target, sval_t* delta) {
 		const op_t& a = in.ops[0];
 
 		if (!adjusted) {
-			if (n == 0 && (in.itype == NN_endbr64 || in.itype == NN_endbr32)) continue;
+			if (n == 0 && (in.itype == NN_endbr64 || in.itype == NN_endbr32))
+				continue;
+
 			if (!frame && in.itype == NN_push && is_reg(a, R_BP)) {
 				frame = true;
 				continue;
 			}
-			if (frame && in.itype == NN_mov && is_reg(a, R_BP) && is_reg(in.ops[1], R_SP))
+
+			if (frame && in.itype == NN_mov && is_reg(a, R_BP) &&
+				is_reg(in.ops[1], R_SP))
 				continue;
+
 			if (!this_adjust(in, frame, d)) return false;
 			adjusted = true;
+
 			continue;
 		}
 
@@ -86,12 +103,15 @@ bool adjustor_thunk(ea_t ea, ea_t* target, sval_t* delta) {
 			frame = false;
 			continue;
 		}
+
 		if (frame || in.itype != NN_jmp || a.type != o_near) return false;
 
 		if (target) *target = a.addr;
 		if (delta) *delta = d;
+
 		return true;
 	}
+
 	return false;
 }
 
@@ -101,7 +121,8 @@ static bool fits(const tinfo_t& t, size_t extent) {
 }
 
 static bool vtbl_type(const qstring& iface, tinfo_t& out) {
-	return out.get_named_type(nullptr, (iface + "_vtbl").c_str()) && out.is_struct();
+	return out.get_named_type(nullptr, (iface + "_vtbl").c_str()) &&
+		   out.is_struct();
 }
 
 bool model::add(
@@ -248,7 +269,9 @@ void model::collect() {
 			// The thunk's target is labeled from the same slot and adjust this
 			ea_t target;
 			sval_t delta;
-			if (adjustor_thunk(s.func, &target, &delta) && is_slot_target(target)) {
+
+			if (adjustor_thunk(s.func, &target, &delta) &&
+				is_slot_target(target)) {
 				s.func = target;
 				s.sub_offset += delta;
 				s.via_thunk = true;
@@ -269,16 +292,19 @@ void model::collect() {
 
 // Record for owner (any if null): direct before via thunk, primary before
 // secondary, then by address so the choice doesn't depend on discovery order
-static int pick_rec(const std::vector<slot_rec>& slots, const std::vector<int>& recs,
-	const qstring* owner) {
+static int pick_rec(const std::vector<slot_rec>& slots,
+	const std::vector<int>& recs, const qstring* owner) {
 	auto key = [&](int i) {
 		const slot_rec& s = slots[i];
 		return std::make_tuple(s.via_thunk, s.sub_offset != 0, s.vt, s.index);
 	};
 	int best = -1;
-	for (int i : recs)
-		if ((owner == nullptr || slots[i].cls == *owner) && (best < 0 || key(i) < key(best)))
+	for (int i : recs) {
+		if ((owner == nullptr || slots[i].cls == *owner) &&
+			(best < 0 || key(i) < key(best)))
 			best = i;
+	}
+
 	return best;
 }
 
@@ -289,7 +315,8 @@ static int pick_rec(const std::vector<slot_rec>& slots, const std::vector<int>& 
 */
 bool model::resolve_owner(const std::vector<int>& recs, func_rec& fr) const {
 	std::set<qstring> owners;
-	for (int i : recs) owners.insert(slots[i].cls);
+	for (int i : recs)
+		owners.insert(slots[i].cls);
 
 	for (const qstring& a : owners) {
 		bool all = true;
@@ -315,12 +342,16 @@ bool model::resolve_owner(const std::vector<int>& recs, func_rec& fr) const {
 		std::vector<qstring> at;
 		for (int i : recs) {
 			if (slots[i].cls != o) continue;
-			for (const qstring& b : rtti::bases_at(c->second, slots[i].sub_offset))
-				if (std::find(at.begin(), at.end(), b) == at.end()) at.push_back(b);
+			for (const qstring& b :
+				rtti::bases_at(c->second, slots[i].sub_offset))
+				if (std::find(at.begin(), at.end(), b) == at.end())
+					at.push_back(b);
 		}
 
 		if (first) common = at;
-		else others.emplace_back(at.begin(), at.end());
+		else
+			others.emplace_back(at.begin(), at.end());
+
 		first = false;
 	}
 
@@ -332,7 +363,8 @@ bool model::resolve_owner(const std::vector<int>& recs, func_rec& fr) const {
 					 }),
 		common.end());
 
-	// Deepest: not a base of another shared base (RTTI permitting), order breaks ties
+	// Deepest: not a base of another shared base (RTTI permitting), order
+	// breaks ties
 	for (const qstring& c : common) {
 		bool deepest = true;
 		for (const qstring& d : common)
@@ -357,7 +389,8 @@ void model::classify(ea_t f, const std::vector<int>& recs) {
 		owners.insert(slots[i].cls);
 		methods.insert(slots[i].method);
 		if (slots[i].via_thunk) thunked.insert(slots[i].cls);
-		else direct++;
+		else
+			direct++;
 	}
 
 	// A thunk target also has a slot in the untyped part of its class's
@@ -373,10 +406,11 @@ void model::classify(ea_t f, const std::vector<int>& recs) {
 	} else if (adjustor_thunk(f, &fr.thunk_target)) {
 		fr.kind = func_kind::THUNK;
 		if (methods.size() == 1) resolve_owner(recs, fr);
-	} else if (pf != nullptr && (pf->start_ea != f || (pf->flags & FUNC_LIB) != 0)) {
+	} else if (pf != nullptr &&
+			   (pf->start_ea != f || (pf->flags & FUNC_LIB) != 0)) {
 		fr.kind = func_kind::SKIP;
-	} else if (extra < 0 || extra > int(thunked.size()) || methods.size() != 1 ||
-			   !resolve_owner(recs, fr)) {
+	} else if (extra < 0 || extra > int(thunked.size()) ||
+			   methods.size() != 1 || !resolve_owner(recs, fr)) {
 		// Slots elsewhere (other classes, unknown vtables), other methods or
 		// owners without a shared base
 		fr.kind = func_kind::FOLDED;
@@ -403,12 +437,14 @@ void model::assign_names() {
 		const slot_rec& s = slots[fr.rec];
 
 		fr.name.sprnt("%s::%s", fr.owner.c_str(), s.method.c_str());
-		if (fr.kind == func_kind::THUNK) fr.name.cat_sprnt("$thunk%X", uint32(s.sub_offset));
+		if (fr.kind == func_kind::THUNK)
+			fr.name.cat_sprnt("$thunk%X", uint32(s.sub_offset));
 		by_name[fr.name].push_back(f);
 	}
 
 	std::set<qstring> taken;
-	for (const auto& [n, fs] : by_name) taken.insert(n);
+	for (const auto& [n, fs] : by_name)
+		taken.insert(n);
 
 	for (auto& [n, fs] : by_name) {
 		if (fs.size() < 2) continue;
@@ -417,14 +453,17 @@ void model::assign_names() {
 			const slot_rec& s = slots[funcs[f].rec];
 			return std::make_tuple(s.sub_offset, s.via_thunk, s.vt, s.index);
 		};
-		std::sort(fs.begin(), fs.end(), [&](ea_t a, ea_t b) { return key(a) < key(b); });
+		std::sort(fs.begin(), fs.end(),
+			[&](ea_t a, ea_t b) { return key(a) < key(b); });
 
 		for (size_t i = 1; i < fs.size(); i++) {
 			func_rec& fr = funcs[fs[i]];
 			qstring alias;
-			alias.sprnt("%s$adj%X", n.c_str(), uint32(slots[fr.rec].sub_offset));
+			alias.sprnt(
+				"%s$adj%X", n.c_str(), uint32(slots[fr.rec].sub_offset));
 			for (int k = 2; taken.count(alias) != 0; k++)
-				alias.sprnt("%s$adj%X$%d", n.c_str(), uint32(slots[fr.rec].sub_offset), k);
+				alias.sprnt("%s$adj%X$%d", n.c_str(),
+					uint32(slots[fr.rec].sub_offset), k);
 			taken.insert(alias);
 			fr.name = alias;
 		}

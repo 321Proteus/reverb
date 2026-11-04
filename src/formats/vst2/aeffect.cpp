@@ -20,9 +20,7 @@ namespace {
 qstring val_str(const val_t& v, const aeffect_hit_t& h) {
 	qstring s;
 	switch (v.t) {
-	case val_t::NUM:
-		s.sprnt("0x%llX", (unsigned long long)v.num);
-		break;
+	case val_t::NUM:  s.sprnt("0x%llX", (unsigned long long)v.num); break;
 	case val_t::ADDR: {
 		qstring n;
 		get_ea_name(&n, v.ea);
@@ -34,9 +32,7 @@ qstring val_str(const val_t& v, const aeffect_hit_t& h) {
 		else
 			s.sprnt("var%d%+lld", v.loc.var, (long long)v.loc.off);
 		break;
-	default:
-		s = "<runtime value>";
-		break;
+	default: s = "<runtime value>"; break;
 	}
 	return s;
 }

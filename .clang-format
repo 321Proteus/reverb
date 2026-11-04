@@ -24,3 +24,11 @@ AccessModifierOffset: -4
 SortIncludes: Never
 IncludeBlocks: Preserve
 AllowShortIfStatementsOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCaseColons: false
+  
+AllowShortBlocksOnASingleLine: Always

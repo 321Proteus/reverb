@@ -18,14 +18,10 @@ static const FormatModule kClap = { RV_CLAP_TYPES_SRC, &clap::scan,
 
 const FormatModule* get_format_module(Interface iface) {
 	switch (iface) {
-	case rv::Interface::VST3:
-		return &kVst3;
-	case rv::Interface::VST2:
-		return &kVst2;
-	case rv::Interface::CLAP:
-		return &kClap;
-	default:
-		return nullptr;
+	case rv::Interface::VST3: return &kVst3;
+	case rv::Interface::VST2: return &kVst2;
+	case rv::Interface::CLAP: return &kClap;
+	default:				  return nullptr;
 	}
 }
 

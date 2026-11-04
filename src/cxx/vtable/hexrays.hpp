@@ -154,7 +154,8 @@ struct obj_tracker_t {
 		function pointer fields such as obj->callback(). vptr_off receives the
 		subobject offset of the vptr used (0 = primary).
 	*/
-	bool vcall_slot(cexpr_t* callee, int& slot, sval_t* vptr_off = nullptr) const;
+	bool vcall_slot(
+		cexpr_t* callee, int& slot, sval_t* vptr_off = nullptr) const;
 
 	// Vtable of the subobject at off
 	ea_t vtable_at(sval_t off) const {
@@ -167,8 +168,9 @@ struct obj_tracker_t {
 	ea_t vcall_target(cexpr_t* callee) const {
 		int slot;
 		sval_t off;
-		return vcall_slot(callee, slot, &off) ? vtbl::slot_func(vtable_at(off), slot)
-											  : BADADDR;
+		return vcall_slot(callee, slot, &off)
+				   ? vtbl::slot_func(vtable_at(off), slot)
+				   : BADADDR;
 	}
 };
 

@@ -87,8 +87,8 @@ void rv::vst3::label_factory() {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
 		const qstring type = vtbl::pick_type(
-			h.vtable_ea, {"IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
-							 "IPluginFactory_vtbl"});
+			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
+							 "IPluginFactory_vtbl" });
 
 		const bool ok =
 			!type.empty() && (rtti ? model.add(h.vtable_ea, type.c_str())

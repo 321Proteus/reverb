@@ -87,9 +87,11 @@ static void bases(
 	};
 
 	switch (ti_kind(ti)) {
-	case TI_SI:
+
+	case TI_SI: {
 		add(read_ptr(ti + 2 * ptr_size()), off, virt);
 		break;
+	}
 	case TI_VMI: {
 		const uint32 n = get_dword(ti + 2 * ptr_size() + 4);
 		if (n > MAX_BASES) break;
@@ -102,8 +104,7 @@ static void bases(
 		}
 		break;
 	}
-	default:
-		break;
+	default: break;
 	}
 }
 

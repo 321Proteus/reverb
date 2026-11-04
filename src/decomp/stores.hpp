@@ -108,8 +108,7 @@ inline bool fold_addr(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 		return fold_lvalue(e->x, alias, out, sz);
 	}
 
-	default:
-		return false;
+	default: return false;
 	}
 }
 
