@@ -79,10 +79,6 @@ void rv::vst3::label_factory() {
 		}
 	}
 
-	vtbl::model model;
-	const bool rtti = model.add_rtti_vtables() > 0;
-	if (rtti) rv_log("%u RTTI vtables", unsigned(model.vtables.size()));
-
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
@@ -90,16 +86,13 @@ void rv::vst3::label_factory() {
 			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
 							 "IPluginFactory_vtbl" });
 
-		const bool ok =
-			!type.empty() && (rtti ? model.add(h.vtable_ea, type.c_str())
-								   : vtbl::label(h.vtable_ea, type.c_str()));
-
-		if (!ok) {
+		if (type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
 			continue;
-		} else {
-			rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 		}
+
+		vtbl::pin(h.vtable_ea, type.c_str());
+		rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 
 		ea_t global_ea = BADADDR;
 
@@ -132,11 +125,5 @@ void rv::vst3::label_factory() {
 			rv_log("Typed factory singleton at %a", global_ea);
 			mark_cfunc_dirty(gpf_ea);
 		}
-	}
-
-	if (rtti) {
-		model.collect();
-		const vtbl::label_stats st = vtbl::apply(model);
-		rv_log("Vtable labels: %s", vtbl::format_stats(st).c_str());
 	}
 }

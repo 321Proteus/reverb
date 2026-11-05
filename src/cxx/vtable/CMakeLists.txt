@@ -7,4 +7,6 @@ target_sources(reverb PRIVATE
     layout.hpp
     model.cpp
     model.hpp
+    reconstruct.cpp
+    reconstruct.hpp
 )

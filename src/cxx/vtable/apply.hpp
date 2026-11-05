@@ -35,9 +35,6 @@ label_stats apply(const model& m, const label_policy& p = {});
 // for logging
 qstring format_stats(const label_stats& s);
 
-// Types and labels one vtable as type_name (an "ISomeInterface_vtbl")
-bool label(ea_t vtbl_ea, const char* type_name);
-
 // The first candidate vtable type that fits the extent, or empty
 qstring pick_type(ea_t ea, std::initializer_list<const char*> candidates);
 
