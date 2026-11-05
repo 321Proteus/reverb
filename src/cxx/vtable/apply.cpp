@@ -167,20 +167,6 @@ qstring format_stats(const label_stats& s) {
 	return out;
 }
 
-bool label(ea_t vtbl_ea, const char* type_name) {
-	model m;
-	if (!m.add(vtbl_ea, type_name) || m.vtables.front().iface_vtbl.empty())
-		return false;
-
-	m.collect();
-	const label_stats st = apply(m);
-
-	// Typed by this or earlier
-	tinfo_t cur;
-	return st.vtables > 0 || (get_tinfo(&cur, vtbl_ea) &&
-								 cur.equals_to(m.vtables.front().iface_vtbl));
-}
-
 qstring pick_type(ea_t ea, std::initializer_list<const char*> candidates) {
 	const size_t n = extent(ea);
 	const size_t psz = ptr_size();
