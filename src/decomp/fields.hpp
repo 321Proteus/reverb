@@ -13,7 +13,7 @@ struct field_val_t {
 
 namespace rv {
 
-enum fkind_t { F_INT, F_FN, F_PTR };
+enum fkind_t { F_INT, F_FN, F_PTR, F_STR };
 
 // One member of a struct layout
 struct field_desc_t {
