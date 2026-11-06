@@ -82,16 +82,16 @@ void rv::vst3::label_factory() {
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
-		const qstring type = vtbl::pick_type(
+		const qstring vtbl_type = vtbl::pick_type(
 			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
 							 "IPluginFactory_vtbl" });
 
-		if (type.empty()) {
+		if (vtbl_type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
 			continue;
 		}
 
-		vtbl::pin(h.vtable_ea, type.c_str());
+		vtbl::pin(h.vtable_ea, vtbl_type.c_str());
 		rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 
 		ea_t global_ea = BADADDR;
@@ -109,10 +109,13 @@ void rv::vst3::label_factory() {
 		if (global_ea == BADADDR) {
 			rv_log("No global found for this factory");
 			continue;
-		}
+		};
+
+		int idx = qisdigit(vtbl_type.at(14)) ? 15 : 14;
+		qstring type = vtbl_type.substr(0, idx);
 
 		tinfo_t ti;
-		if (!ti.get_named_type(nullptr, "IPluginFactory")) {
+		if (!ti.get_named_type(nullptr, type.c_str())) {
 			rv_log("IPluginFactory type missing");
 			continue;
 		}
