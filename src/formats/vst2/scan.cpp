@@ -146,6 +146,7 @@ static bool load_aeffect_layout(
 		fkind_t k = udm.type.is_funcptr() ? F_FN
 					: udm.type.is_ptr()	  ? F_PTR
 										  : F_INT;
+
 		out.push_back({ name, int(udm.offset / 8), int(udm.size / 8),
 			k }); // udm is in bits
 

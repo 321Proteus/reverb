@@ -3,4 +3,6 @@ target_sources(reverb PRIVATE
     analysis.hpp
     ctree.hpp
     stores.hpp
+    fields.hpp
+    fields.cpp
 )

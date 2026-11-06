@@ -1,36 +1,19 @@
 #pragma once
 
-#include "decomp/stores.hpp"
+#include "decomp/fields.hpp"
 #include <hexrays.hpp>
 #include <map>
 #include <pro.h>
 #include <vector>
 
-// A resolved AEffect field
-struct field_val_t {
-	val_t v;
-	ea_t src_ea = BADADDR;
-};
-
 namespace rv::vst2 {
 
-struct aeffect_hit_t {
+struct aeffect_hit_t : object_fields_t {
 	ea_t func = BADADDR;
 	ea_t magic_ea = BADADDR;
-	int64 base_off = 0;
-	int root = -1;
-	std::map<qstring, field_val_t> fields;
-	uint32 flags = 0;
 };
 
-enum fkind_t { F_INT, F_FN, F_PTR };
-
-struct aeffect_field_t {
-	const char* name;
-	int off; // bytes from AEffect::magic
-	int sz;	 // bytes
-	fkind_t kind;
-};
+using aeffect_field_t = field_desc_t;
 
 inline constexpr const char* members[] = {
 	"dispatcher",
