@@ -20,14 +20,10 @@ static bool may_be_factory(ea_t vt) {
 }
 
 void rv::vst3::label_factory() {
-	ea_t gpf_ea = get_name_ea(BADADDR, "GetPluginFactory");
+	const ea_t gpf_ea = find_get_plugin_factory();
 	if (gpf_ea == BADADDR) {
-		gpf_ea = get_name_ea(BADADDR, "_GetPluginFactory");
-
-		if (gpf_ea == BADADDR) {
-			rv_log("GetPluginFactory not found");
-			return;
-		}
+		rv_log("GetPluginFactory not found");
+		return;
 	}
 
 	func_t* pfn = rv::ensure_func(gpf_ea);
