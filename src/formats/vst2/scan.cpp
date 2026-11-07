@@ -20,6 +20,7 @@
 #include <utility>
 #include <ua.hpp>
 #include "db/func_iter.hpp"
+#include "db/types.hpp"
 
 // Calls cb(ea) for every aligned occurrence of x in the loaded
 // image, excluding matches that sit inside instructions (find_imm already
@@ -116,49 +117,6 @@ static void find_candidates(std::set<ea_t>& funcs) {
 
 namespace rv::vst2 {
 
-static bool load_aeffect_layout(
-	std::vector<aeffect_field_t>& out, int& total_size) {
-	tinfo_t t;
-	if (!t.get_named_type(get_idati(), "AEffect") || !t.is_struct()) {
-		rv_log("AEffect type not found in local types - was types.h parsed?");
-		return false;
-	}
-
-	size_t sz = t.get_size();
-	const int expected = inf_is_64bit() ? 192 : 144;
-	if (sz == BADSIZE || int(sz) != expected) {
-		rv_log("AEffect is %d bytes, expected %d - check types.h declarations",
-			sz == BADSIZE ? -1 : int(sz), expected);
-		return false;
-	}
-
-	total_size = int(sz);
-
-	for (const char* name : members) {
-		udm_t udm;
-		udm.name = name;
-
-		if (t.find_udm(&udm, STRMEM_NAME) < 0) {
-			rv_log("AEffect::%s missing from types.h, skipping", name);
-			continue;
-		}
-
-		fkind_t k = udm.type.is_funcptr() ? F_FN
-					: udm.type.is_ptr()	  ? F_PTR
-										  : F_INT;
-
-		out.push_back({ name, int(udm.offset / 8), int(udm.size / 8),
-			k }); // udm is in bits
-
-		// rv_log("  layout: %-22s +%-3d size %d %s", name, int(udm.offset / 8),
-		// 	int(udm.size / 8),
-		// 	k == F_FN	 ? "fn"
-		// 	: k == F_PTR ? "ptr"
-		// 				 : "int");
-	}
-	return !out.empty();
-}
-
 /*
 	Most derived vtables of the object behind an AEffect. When the AEffect
 	initializer stores its own object as AEffect::object, it is a constructor
@@ -194,9 +152,10 @@ void scan() {
 
 	std::vector<aeffect_hit_t> all_hits;
 
-	std::vector<aeffect_field_t> fields;
-	int size;
-	load_aeffect_layout(fields, size);
+	layout_t layout;
+	load_layout("AEffect", members, layout, inf_is_64bit() ? 192 : 144, false);
+	const std::vector<aeffect_field_t>& fields = layout.fields;
+	const int size = layout.size;
 
 	for (const ea_t c_ea : candidates) {
 		cfuncptr_t cf = decompile_at(c_ea);
