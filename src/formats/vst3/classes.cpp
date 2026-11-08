@@ -130,12 +130,14 @@ bool find_register_call(const std::vector<call_t>& calls,
 // Appends text unless the function comment already holds it
 void add_func_cmt(ea_t ea, const qstring& text) {
 	qstring cur;
-	get_func_cmt_ea(&cur, ea, false);
+	func_t* func = get_func(ea);
+
+	get_func_cmt(&cur, func, false);
 	if (cur.find(text) != qstring::npos) return;
 
 	if (!cur.empty()) cur.append('\n');
 	cur.append(text);
-	set_func_cmt_ea(ea, cur.c_str(), false);
+	set_func_cmt(func, cur.c_str(), false);
 }
 
 void add_cmt(ea_t ea, const qstring& text) {
