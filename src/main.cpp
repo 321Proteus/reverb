@@ -14,6 +14,7 @@
 #include <typeinf.hpp>
 #include "detect.hpp"
 #include "state.hpp"
+#include "cxx/vtable/reconstruct.hpp"
 #include "formats/types_embed.hpp"
 #include "frameworks/framework.hpp"
 #include "formats/vst2/vst2.hpp"
@@ -43,6 +44,10 @@ static void apply_interfaces(rv::InterfaceSet is) {
 }
 
 static void run_scan(rv::InterfaceSet is) {
+
+	// skip non-plugin binaries
+	if (is.empty()) return;
+
 	is.for_each([](const rv::Interface iface) {
 		const rv::FormatModule* mod = rv::get_format_module(iface);
 		if (!mod) return;
@@ -50,6 +55,8 @@ static void run_scan(rv::InterfaceSet is) {
 		if (mod->scan != nullptr) mod->scan();
 		if (mod->label != nullptr) mod->label();
 	});
+
+	rv::vtbl::reconstruct();
 }
 
 static ssize_t idaapi ui_event_cb(

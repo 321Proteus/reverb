@@ -20,14 +20,10 @@ static bool may_be_factory(ea_t vt) {
 }
 
 void rv::vst3::label_factory() {
-	ea_t gpf_ea = get_name_ea(BADADDR, "GetPluginFactory");
+	const ea_t gpf_ea = find_get_plugin_factory();
 	if (gpf_ea == BADADDR) {
-		gpf_ea = get_name_ea(BADADDR, "_GetPluginFactory");
-
-		if (gpf_ea == BADADDR) {
-			rv_log("GetPluginFactory not found");
-			return;
-		}
+		rv_log("GetPluginFactory not found");
+		return;
 	}
 
 	func_t* pfn = rv::ensure_func(gpf_ea);
@@ -79,27 +75,20 @@ void rv::vst3::label_factory() {
 		}
 	}
 
-	vtbl::model model;
-	const bool rtti = model.add_rtti_vtables() > 0;
-	if (rtti) rv_log("%u RTTI vtables", unsigned(model.vtables.size()));
-
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
-		const qstring type = vtbl::pick_type(
+		const qstring vtbl_type = vtbl::pick_type(
 			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
 							 "IPluginFactory_vtbl" });
 
-		const bool ok =
-			!type.empty() && (rtti ? model.add(h.vtable_ea, type.c_str())
-								   : vtbl::label(h.vtable_ea, type.c_str()));
-
-		if (!ok) {
+		if (vtbl_type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
 			continue;
-		} else {
-			rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 		}
+
+		vtbl::pin(h.vtable_ea, vtbl_type.c_str());
+		rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 
 		ea_t global_ea = BADADDR;
 
@@ -116,10 +105,13 @@ void rv::vst3::label_factory() {
 		if (global_ea == BADADDR) {
 			rv_log("No global found for this factory");
 			continue;
-		}
+		};
+
+		int idx = qisdigit(vtbl_type.at(14)) ? 15 : 14;
+		qstring type = vtbl_type.substr(0, idx);
 
 		tinfo_t ti;
-		if (!ti.get_named_type(nullptr, "IPluginFactory")) {
+		if (!ti.get_named_type(nullptr, type.c_str())) {
 			rv_log("IPluginFactory type missing");
 			continue;
 		}
@@ -132,11 +124,5 @@ void rv::vst3::label_factory() {
 			rv_log("Typed factory singleton at %a", global_ea);
 			mark_cfunc_dirty(gpf_ea);
 		}
-	}
-
-	if (rtti) {
-		model.collect();
-		const vtbl::label_stats st = vtbl::apply(model);
-		rv_log("Vtable labels: %s", vtbl::format_stats(st).c_str());
 	}
 }

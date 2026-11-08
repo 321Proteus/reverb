@@ -29,18 +29,30 @@ struct global_assign_finder_t : public ctree_visitor_t {
 struct ctor_global_finder_t : public ctree_visitor_t {
 	ea_t ctor_ea;
 	ea_t global_ea = BADADDR;
-	int result_var_idx = -1;
+
+	std::set<int> obj_vars;
 
 	ctor_global_finder_t(ea_t ctor) : ctree_visitor_t(CV_FAST), ctor_ea(ctor) {}
 
 	bool is_call_to_ctor(cexpr_t* e) {
 		e = strip_casts(e);
 		if (e->op != cot_call) return false;
+
 		cexpr_t* callee = strip_casts(e->x);
 		return callee->op == cot_obj && callee->obj_ea == ctor_ea;
 	}
 
 	int idaapi visit_expr(cexpr_t* e) override {
+
+		if (e->op == cot_call && is_call_to_ctor(e) && e->a != nullptr &&
+			e->a->size() > 0) {
+
+			cexpr_t* a0 = strip_casts(&e->a->at(0));
+			if (a0->op == cot_var) obj_vars.insert(a0->v.idx);
+
+			return 0;
+		}
+
 		if (e->op != cot_asg) return 0;
 
 		cexpr_t* rhs = strip_casts(e->y);
@@ -48,7 +60,7 @@ struct ctor_global_finder_t : public ctree_visitor_t {
 		// step 1: "v5 = ctor(...)"
 		if (is_call_to_ctor(rhs)) {
 			cexpr_t* lhs = strip_casts(e->x);
-			if (lhs->op == cot_var) result_var_idx = lhs->v.idx;
+			if (lhs->op == cot_var) obj_vars.insert(lhs->v.idx);
 		}
 
 		// step 2: "global = v5" (or "global = ctor(...)" directly)
@@ -56,7 +68,7 @@ struct ctor_global_finder_t : public ctree_visitor_t {
 		if (lhs->op != cot_obj) return 0;
 
 		if (is_call_to_ctor(rhs) ||
-			(rhs->op == cot_var && rhs->v.idx == result_var_idx))
+			(rhs->op == cot_var && obj_vars.count(rhs->v.idx)))
 			global_ea = lhs->obj_ea;
 
 		return 0;
