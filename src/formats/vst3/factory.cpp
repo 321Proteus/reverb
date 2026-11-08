@@ -11,6 +11,17 @@
 
 namespace rv::vst3 {
 
+void tuid_from_longs(const uint32 (&l)[4], bool com, uchar (&out)[16]) {
+	for (int w = 0; w < 4; w++)
+		for (int k = 0; k < 4; k++)
+			out[4 * w + k] = uchar(l[w] >> (24 - 8 * k));
+	if (!com) return;
+	std::swap(out[0], out[3]);
+	std::swap(out[1], out[2]);
+	std::swap(out[4], out[5]);
+	std::swap(out[6], out[7]);
+}
+
 namespace {
 
 constexpr uint32 MANY_INSTANCES = 0x7FFFFFFF;
@@ -186,19 +197,6 @@ store_t raw_store(loc_t at, const uchar* raw, int size, ea_t ea) {
 	for (int i = 0; i < size && i < 8; i++)
 		s.val.num |= uint64(raw[i]) << (8 * i);
 	return s;
-}
-
-// INLINE_UID every long is written big-endian. With COM_COMPATIBLE (Windows)
-// the first long and the two halves of the second are LE, like a guid.
-void tuid_from_longs(const uint32 (&l)[4], bool com, uchar (&out)[16]) {
-	for (int w = 0; w < 4; w++)
-		for (int k = 0; k < 4; k++)
-			out[4 * w + k] = uchar(l[w] >> (24 - 8 * k));
-	if (!com) return;
-	std::swap(out[0], out[3]);
-	std::swap(out[1], out[2]);
-	std::swap(out[4], out[5]);
-	std::swap(out[6], out[7]);
 }
 
 // FUID rebuilt per byte (f(&tmp, l1, l2, l3, l4))

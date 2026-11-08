@@ -17,5 +17,7 @@ void scan() {
 	const auto structs = extract_factory_structs(cf);
 	rv_log("Found %u factory structs in GetPluginFactory",
 		unsigned(structs.size()));
+
+	label_classes(cf, structs);
 }
 } // namespace rv::vst3

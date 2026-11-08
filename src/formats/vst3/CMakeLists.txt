@@ -1,4 +1,5 @@
 target_sources(reverb PRIVATE
+    classes.cpp
     factory.cpp
     factory.hpp
     finders.hpp
