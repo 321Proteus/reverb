@@ -30,27 +30,6 @@ constexpr iid_t KNOWN_IIDS[] = {
 #undef RV_IID
 };
 
-// clang-format off
-constexpr const char* OBJECT_IFACES[] = {
-	"IComponent",
-	"IAudioProcessor",
-	"IProcessContextRequirements",
-	"IConnectionPoint",
-	"IEditController",
-	"IEditController2",
-	"IMidiMapping",
-	"IUnitInfo",
-	"IPlugView"
-};
-// clang-format on
-
-bool is_object_iface(const qstring& s) {
-	for (const char* i : OBJECT_IFACES)
-		if (s == i) return true;
-
-	return false;
-}
-
 // A PClassInfo2 and the registerClass call that passes it
 struct class_rec_t {
 	const factory_struct_t* s = nullptr;
@@ -266,16 +245,29 @@ qstring largest_fit(const std::vector<qstring>& names, ea_t vt) {
 /*
 	The interface to pick for an RTTI vtable is the one with largest fitting
 	base. Only return when it's in OBJECT_IFACES, so a pin makes
-   add_rtti_vtables stay the same
+   add_rtti_vtables stay the same. why explains an empty result
 */
-qstring rtti_iface(ea_t vt, const rtti::class_info& ci) {
+qstring rtti_iface(ea_t vt, const rtti::class_info& ci, qstring& why) {
 	std::vector<qstring> names;
+	const qvector<qstring> bases = rtti::bases_at(ci, ci.sub_offset);
 
-	for (const qstring& b : rtti::bases_at(ci, ci.sub_offset))
+	for (const qstring& b : bases)
 		names.push_back(rtti::short_name(b));
 
 	const qstring best = largest_fit(names, vt);
-	return is_object_iface(best) ? best : qstring();
+	if (!best.empty() && best == rtti::short_name(ci.name)) {
+		why = "vtable of the interface itself";
+		return qstring();
+	}
+
+	if (best.empty()) {
+		why = "no declared interface among RTTI bases (";
+		for (size_t i = 0; i < bases.size(); i++)
+			why.cat_sprnt("%s%s", i ? ", " : "", bases[i].c_str());
+		why.append(")");
+	}
+
+	return best;
 }
 
 // Constants of an if condition
@@ -504,11 +496,11 @@ void type_object(const class_rec_t& r) {
 	std::map<qstring, sval_t> qi;
 
 	for (const auto& [off, vt] : vts) {
-		qstring iface;
+		qstring iface, why;
 		rtti::class_info ci;
 
 		if (rtti::parse_rtti(vt, &ci)) {
-			iface = rtti_iface(vt, ci);
+			iface = rtti_iface(vt, ci, why);
 
 		} else {
 			if (!qi_read) {
@@ -519,26 +511,29 @@ void type_object(const class_rec_t& r) {
 
 			std::vector<qstring> names;
 			for (const auto& [n, k] : qi)
-				if (k == off && is_object_iface(n)) names.push_back(n);
+				if (k == off) names.push_back(n);
 
 			iface = largest_fit(names, vt);
+			if (iface.empty())
+				why = names.empty()
+						  ? "no RTTI, queryInterface returns no IID here"
+						  : "no RTTI, no declared vtable type fits the IIDs";
 		}
 
 		if (iface.empty()) {
-			rv_log("  object of \"%s\": vtable %a at +0x%llX: interface "
-				   "unknown, left alone",
-				r.name.c_str(), vt, (unsigned long long)off);
+			rv_log("  object of \"%s\": vtable %a at +0x%llX left alone: %s",
+				r.name.c_str(), vt, (uint64)off, why.c_str());
 			continue;
 		}
 		if (already_typed(vt)) {
 			rv_log("  object of \"%s\": vtable %a at +0x%llX already typed",
-				r.name.c_str(), vt, (unsigned long long)off);
+				r.name.c_str(), vt, (uint64)off);
 			continue;
 		}
 
 		vtbl::pin(vt, (iface + "_vtbl").c_str());
 		rv_log("  object of \"%s\": vtable %a at +0x%llX -> %s", r.name.c_str(),
-			vt, (unsigned long long)off, iface.c_str());
+			vt, (uint64)off, iface.c_str());
 	}
 }
 
