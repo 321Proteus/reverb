@@ -126,6 +126,10 @@ bool find_register_call(const std::vector<call_t>& calls,
 		for (size_t i = 0; i < c.args.size(); i++) {
 			const call_arg_t& a = c.args[i];
 
+			if (i == self || a.k != call_arg_t::OBJ || !is_code_addr(a.ea) ||
+				in_data_seg(a.ea))
+				continue;
+
 			const ea_t f = resolve_thunk(a.ea);
 			if (ensure_func(f) == nullptr) {
 				rv_log(
