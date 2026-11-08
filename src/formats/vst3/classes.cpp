@@ -298,7 +298,7 @@ struct cond_consts_t : public ctree_visitor_t {
 
 			if (sz == 8) q.insert(e->numval());
 
-			else if (sz != BADSIZE && sz <= 8)
+			else if (sz != BADSIZE && sz <= 4)
 				d.insert(uint32(e->numval()));
 		}
 
