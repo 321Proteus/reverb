@@ -5,6 +5,7 @@
 #include "decomp/analysis.hpp"
 #include "decomp/fields.hpp"
 #include "decomp/stores.hpp"
+#include "ui/report.hpp"
 #include "vst2.hpp"
 #include <cstring>
 #include <hexrays.hpp>
@@ -220,8 +221,8 @@ void apply_aeffect(const std::vector<aeffect_field_t>& fields,
 		if (has_user_name(get_flags(ea))) {
 			qstring cur;
 			get_ea_name(&cur, ea);
-			rv_log("    %s -> %a: keeping existing name '%s'", f.name.c_str(), ea,
-				cur.c_str());
+			rv_log("    %s -> %a: keeping existing name '%s'", f.name.c_str(),
+				ea, cur.c_str());
 
 		} else if (set_name(ea, nm.c_str(), SN_NOWARN | SN_FORCE)) {
 			rv_log("    %s -> %a: named %s", f.name.c_str(), ea, nm.c_str());
@@ -276,6 +277,35 @@ void apply_aeffect(const std::vector<aeffect_field_t>& fields,
 	mark_cfunc_dirty(h.func);
 
 	rv_log("  %s", c.c_str());
+
+	report::heading("VST2 AEffect", cmt_ea);
+
+	if (have_uid) report::row("uniqueID", fourcc(uint32(uid)));
+	if (uint64 ver = 0; num("version", &ver))
+		report::row("version", qstring(std::to_string(ver).c_str()));
+
+	if (have_in || have_out) {
+		qstring io;
+		io.sprnt("%s in / %s out", have_in ? std::to_string(ni).c_str() : "?",
+			have_out ? std::to_string(no).c_str() : "?");
+		report::row("I/O", io);
+	}
+
+	if (num("numParams", &np))
+		report::row("params", qstring(std::to_string(np).c_str()));
+	if (num("numPrograms", &pr))
+		report::row("programs", qstring(std::to_string(pr).c_str()));
+
+	report::row(have_flags ? "flags" : "flags (at least)", flags_str(flags));
+	report::addr_row("built by", h.func);
+
+	for (const aeffect_field_t& f : fields) {
+		if (f.kind != F_FN) continue;
+
+		auto it = h.fields.find(f.name);
+		if (it != h.fields.end() && it->second.v.t == val_t::ADDR)
+			report::addr_row(f.name, it->second.v.ea);
+	}
 }
 
 } // namespace rv::vst2

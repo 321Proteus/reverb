@@ -13,7 +13,6 @@
 #include <pro.h>
 #include <search.hpp>
 #include <bytes.hpp>
-#include <cstring>
 #include <segment.hpp>
 #include <map>
 #include <set>
@@ -21,6 +20,7 @@
 #include <ua.hpp>
 #include "db/func_iter.hpp"
 #include "db/types.hpp"
+#include "ui/report.hpp"
 
 // Calls cb(ea) for every aligned occurrence of x in the loaded
 // image, excluding matches that sit inside instructions (find_imm already
@@ -147,6 +147,10 @@ static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 
 void scan() {
 
+	const ea_t entry = find_entry();
+	report::heading("VST2 entry", entry);
+	report::addr_row("entry", entry);
+
 	std::set<ea_t> candidates;
 	find_candidates(candidates);
 
@@ -163,6 +167,11 @@ void scan() {
 			auto hits = extract_aeffects(fields, size, cf);
 			all_hits.insert(all_hits.end(), hits.begin(), hits.end());
 		}
+	}
+
+	if (all_hits.empty()) {
+		report::heading("VST2 AEffect");
+		report::row("AEffect", "(not found)");
 	}
 
 	int64 object_off = -1;
