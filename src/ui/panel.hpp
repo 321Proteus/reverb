@@ -6,8 +6,11 @@ namespace rv::panel {
 void init();
 void term();
 
-// Opens panel or brings it to front
+// Opens the panel, or refreshes it and brings it to front
 void show();
+
+// show() once the current event has returned, e.g. from an IDB callback
+void show_later();
 
 // Closes the panel
 void close();

@@ -1,0 +1,32 @@
+#include "report.hpp"
+#include <name.hpp>
+
+namespace rv::report {
+
+static std::vector<report_entry_t> g_entries;
+
+void clear() { g_entries.clear(); }
+
+const std::vector<report_entry_t>& entries() { return g_entries; }
+
+void heading(const qstring& title, ea_t ea) {
+	g_entries.push_back({ true, title, qstring(), ea });
+}
+
+void row(const qstring& key, const qstring& value, ea_t ea) {
+	g_entries.push_back({ false, key, value, ea });
+}
+
+void addr_row(const qstring& key, ea_t ea) {
+	if (ea == BADADDR) {
+		row(key, "(none)");
+		return;
+	}
+
+	qstring n, v;
+	get_ea_name(&n, ea);
+	v.sprnt("%s (%a)", n.empty() ? "?" : n.c_str(), ea);
+	row(key, v, ea);
+}
+
+} // namespace rv::report
