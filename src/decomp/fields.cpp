@@ -45,7 +45,8 @@ static qstring field_str(const field_desc_t& f, const val_t& v,
 	const object_fields_t& o, const char* self_label) {
 	qstring str, s;
 
-	if (f.kind == F_STR && v.t == val_t::ADDR && read_utf8(v.ea, str)) {
+	if ((f.kind == F_STR || f.kind == F_CSTR) && v.t == val_t::ADDR &&
+		read_utf8(v.ea, str)) {
 		s.sprnt("\"%s\"", str.c_str());
 		return s;
 	}

@@ -41,10 +41,22 @@ struct layout_t {
 	}
 };
 
+inline fkind_t field_kind(const tinfo_t& t) {
+	if (t.is_funcptr()) return F_FN;
+
+	if (t.is_ptr()) {
+		const tinfo_t c = t.get_pointed_object();
+		return c.is_char() || c.is_uchar() ? F_CSTR : F_PTR;
+	}
+
+	return t.is_array() ? F_STR : F_INT;
+}
+
 /*
 	Read the named members of a local struct type into out.
 	Kinds follow the member type:
 	F_FN - func pointer
+	F_CSTR - pointer to string
 	F_PTR - regular pointer
 	F_STR - array
 	F_INT anything else
@@ -77,10 +89,8 @@ inline bool load_layout(const char* type, const char* const* members, size_t n,
 			continue;
 		}
 
-		const fkind_t k = udm.type.is_funcptr() ? F_FN
-						  : udm.type.is_ptr()	? F_PTR
-						  : udm.type.is_array() ? F_STR
-												: F_INT;
+		const fkind_t k = field_kind(udm.type);
+
 		// udm is in bits
 		out.fields.push_back(
 			{ members[i], int(udm.offset / 8), int(udm.size / 8), k });
