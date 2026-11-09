@@ -29,4 +29,6 @@ void addr_row(const qstring& key, ea_t ea) {
 	row(key, v, ea);
 }
 
+void assign(std::vector<report_entry_t> es) { g_entries = std::move(es); }
+
 } // namespace rv::report

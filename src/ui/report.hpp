@@ -18,6 +18,9 @@ const std::vector<report_entry_t>& entries();
 void heading(const qstring& title, ea_t ea = BADADDR);
 void row(const qstring& key, const qstring& value, ea_t ea = BADADDR);
 
+// Replaces all entries, e.g. with the ones stored in the IDB
+void assign(std::vector<report_entry_t> es);
+
 // "name (ea)", jumping to ea
 void addr_row(const qstring& key, ea_t ea);
 
