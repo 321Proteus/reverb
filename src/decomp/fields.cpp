@@ -113,4 +113,62 @@ void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 	}
 }
 
+void resolve_data_fields(const std::vector<field_desc_t>& fields, ea_t ea,
+	object_fields_t& o, bool is64, const char* self_label) {
+
+	const int psz = is64 ? 8 : 4;
+	o.root = 0;
+	o.base_off = 0;
+
+	std::vector<store_t> stores;
+	for (const field_desc_t& f : fields) {
+
+		const ea_t at = ea + f.off;
+		if (f.sz <= 0 || !is_loaded(at) || !is_loaded(at + f.sz - 1)) continue;
+
+		store_t s;
+		s.loc = { 0, f.off };
+		s.size = f.sz;
+		s.ea = at;
+
+		if (f.kind == F_STR) {
+
+			// The characters are in place
+			s.val.t = val_t::ADDR;
+			s.val.ea = at;
+			s.size = std::max(f.sz, psz);
+
+		} else if ((f.kind == F_FN || f.kind == F_PTR || f.kind == F_CSTR) &&
+				   f.sz == psz) {
+
+			// Scanned data has no offset items
+			const ea_t p = read_ptr(at);
+			if (p != 0) {
+				s.val.t = val_t::ADDR;
+				s.val.ea = p;
+			} else {
+				s.val.t = val_t::NUM;
+			}
+
+		} else if (f.sz <= 8) {
+			s.val.t = val_t::NUM;
+			for (int i = f.sz - 1; i >= 0; i--) {
+				s.val.num = (s.val.num << 8) | get_byte(at + i);
+			}
+
+		} else if (f.sz <= int(sizeof(s.val.raw))) {
+			s.val.t = val_t::NUM;
+			s.val.raw_len = f.sz;
+			get_bytes(s.val.raw, f.sz, at);
+
+		} else {
+			continue;
+		}
+
+		stores.push_back(std::move(s));
+	}
+
+	resolve_fields(fields, o, stores, is64, self_label);
+}
+
 } // namespace rv
