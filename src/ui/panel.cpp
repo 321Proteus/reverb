@@ -2,6 +2,7 @@
 #include "core/log.hpp"
 #include "report.hpp"
 #include <algorithm>
+#include <set>
 #include <kernwin.hpp>
 #include <lines.hpp>
 #include <cstring>
@@ -19,7 +20,8 @@ static TWidget* g_viewer = nullptr;
 
 static int g_icon = -1;
 static strvec_t g_lines;
-static std::vector<ea_t> g_eas;
+static std::vector<int> g_src;	// entry index behind each line, -1 if none
+static std::set<size_t> g_open; // expanded groups, by entry index
 
 // Bytes below 0x20 are color tags, and the recovered strings usually have some
 static qstring printable(const qstring& s) {
@@ -29,14 +31,42 @@ static qstring printable(const qstring& s) {
 	return r;
 }
 
-static void add(const qstring& line, ea_t ea = BADADDR) {
+static void add(const qstring& line, int src = -1) {
 	g_lines.push_back(simpleline_t(line));
-	g_eas.push_back(ea);
+	g_src.push_back(src);
+}
+
+static bool is_row(report::entry_kind_t k) {
+	return k == report::ROW || k == report::GROUP;
+}
+
+// Widest key among the rows (or the children) from i on
+static size_t key_width(size_t i, bool children) {
+	const auto& es = report::entries();
+	size_t w = 0;
+	for (; i < es.size() && es[i].kind != report::HEADING; i++) {
+		if (children && es[i].kind != report::CHILD) break;
+		if (children || is_row(es[i].kind))
+			w = std::max(w, es[i].key.length());
+	}
+	return w;
+}
+
+static qstring row_line(const char* indent, size_t w, const qstring& key,
+	const qstring& value) {
+	const qstring v = printable(value);
+	const char* color = v.starts_with("\"")  ? SCOLOR_DSTR
+						: v.starts_with("(") ? SCOLOR_AUTOCMT
+											 : SCOLOR_DEFAULT;
+	qstring l;
+	l.sprnt("%s%-*s  %s%s%s%s%s", indent, int(w), printable(key).c_str(),
+		SCOLOR_ON, color, v.c_str(), SCOLOR_OFF, color);
+	return l;
 }
 
 static void build() {
 	g_lines.clear();
-	g_eas.clear();
+	g_src.clear();
 
 	const auto& es = report::entries();
 	if (es.empty()) {
@@ -45,55 +75,83 @@ static void build() {
 		return;
 	}
 
+	size_t w = key_width(0, false), cw = 0;
+	bool open = false;
+
 	for (size_t i = 0; i < es.size(); i++) {
 		const report::report_entry_t& e = es[i];
+		const int src = int(i);
 
-		if (e.heading) {
-			if (i != 0) add("");
+		switch (e.kind) {
+		case report::HEADING: {
+			if (!g_lines.empty()) add("");
 
 			qstring h;
 			h.sprnt(COLSTR("%s", SCOLOR_DNAME), printable(e.key).c_str());
-			add(h, e.ea);
-			continue;
+			add(h, src);
+			w = key_width(i + 1, false);
+			break;
 		}
-
-		size_t w = 0;
-		for (size_t j = i; j < es.size() && !es[j].heading; j++)
-			w = std::max(w, es[j].key.length());
-
-		for (; i < es.size() && !es[i].heading; i++) {
-			const qstring v = printable(es[i].value);
-			const char* color = v.starts_with("\"")	 ? SCOLOR_DSTR
-								: v.starts_with("(") ? SCOLOR_AUTOCMT
-													 : SCOLOR_DEFAULT;
-			qstring l;
-			l.sprnt("  %-*s  %s%s%s%s%s", int(w), printable(es[i].key).c_str(),
-				SCOLOR_ON, color, v.c_str(), SCOLOR_OFF, color);
-			add(l, es[i].ea);
+		case report::ROW: add(row_line("    ", w, e.key, e.value), src); break;
+		case report::GROUP:
+			open = g_open.count(i) != 0;
+			cw = key_width(i + 1, true);
+			add(row_line(open ? "  \xE2\x96\xBE " : "  \xE2\x96\xB8 ", w, e.key,
+					e.value),
+				src);
+			break;
+		case report::CHILD:
+			if (open) add(row_line("      ", cw, e.key, e.value), src);
+			break;
 		}
-		i--;
 	}
 }
 
-static ea_t ea_at(TWidget* cv) {
+static int src_at(TWidget* cv) {
 	int x, y;
 	place_t* p = get_custom_viewer_place(cv, false, &x, &y);
-	if (p == nullptr) return BADADDR;
+	if (p == nullptr) return -1;
 
 	const uint32 n = static_cast<simpleline_place_t*>(p)->n;
-	return n < g_eas.size() ? g_eas[n] : BADADDR;
+	return n < g_src.size() ? g_src[n] : -1;
 }
 
-static bool idaapi on_dblclick(TWidget* cv, int, void*) {
-	const ea_t ea = ea_at(cv);
-	if (ea == BADADDR) return false;
+// Rebuilds the lines, keeping the cursor where it was
+static void rebuild(TWidget* cv) {
+	int x = 0, y = 0;
+	place_t* p = get_custom_viewer_place(cv, false, &x, &y);
+	simpleline_place_t at(p != nullptr
+							  ? static_cast<simpleline_place_t*>(p)->n
+							  : 0);
 
-	jumpto(ea);
+	build();
+	simpleline_place_t first, last(int(g_lines.size()) - 1);
+	set_custom_viewer_range(cv, &first, &last);
+	refresh_custom_viewer(cv);
+	jumpto(cv, &at, x, y);
+}
+
+// Folds or unfolds a group, otherwise jumps to the entry's address
+static bool activate(TWidget* cv) {
+	const int src = src_at(cv);
+	if (src < 0) return false;
+
+	const report::report_entry_t& e = report::entries()[src];
+	if (e.kind == report::GROUP) {
+		if (!g_open.erase(src)) g_open.insert(src);
+		rebuild(cv);
+		return true;
+	}
+
+	if (e.ea == BADADDR) return false;
+	jumpto(e.ea);
 	return true;
 }
 
+static bool idaapi on_dblclick(TWidget* cv, int, void*) { return activate(cv); }
+
 static bool idaapi on_key(TWidget* cv, int key, int shift, void*) {
-	return key == IK_RETURN && shift == 0 && on_dblclick(cv, 0, nullptr);
+	return key == IK_RETURN && shift == 0 && activate(cv);
 }
 
 static void idaapi on_close(TWidget* cv, void*) {
@@ -150,7 +208,8 @@ void close() {
 	g_widget = nullptr;
 	g_viewer = nullptr;
 	g_lines.clear();
-	g_eas.clear();
+	g_src.clear();
+	g_open.clear();
 }
 
 namespace {
@@ -178,6 +237,7 @@ struct show_req_t : public ui_request_t {
 } // namespace
 
 void show_later() {
+	g_open.clear(); // the entries were replaced, the indices mean nothing now
 	if (is_idaq()) execute_ui_requests(new show_req_t, nullptr);
 }
 

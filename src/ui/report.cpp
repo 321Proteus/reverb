@@ -10,11 +10,19 @@ void clear() { g_entries.clear(); }
 const std::vector<report_entry_t>& entries() { return g_entries; }
 
 void heading(const qstring& title, ea_t ea) {
-	g_entries.push_back({ true, title, qstring(), ea });
+	g_entries.push_back({ HEADING, title, qstring(), ea });
 }
 
 void row(const qstring& key, const qstring& value, ea_t ea) {
-	g_entries.push_back({ false, key, value, ea });
+	g_entries.push_back({ ROW, key, value, ea });
+}
+
+void group(const qstring& key, const qstring& value, ea_t ea) {
+	g_entries.push_back({ GROUP, key, value, ea });
+}
+
+void child(const qstring& key, const qstring& value, ea_t ea) {
+	g_entries.push_back({ CHILD, key, value, ea });
 }
 
 void addr_row(const qstring& key, ea_t ea) {
