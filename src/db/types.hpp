@@ -104,4 +104,45 @@ bool load_layout(const char* type, const char* const (&members)[N],
 	return load_layout(type, members, N, out, expected_size, require_all);
 }
 
+// Members of t at base, nested structs flattened into dotted paths
+inline void flatten_members(
+	const tinfo_t& t, const qstring& prefix, int64 base, layout_t& out) {
+	udt_type_data_t udt;
+	if (!t.get_udt_details(&udt)) return;
+
+	for (const udm_t& m : udt) {
+		if (m.is_gap() || m.is_bitfield()) continue;
+
+		const qstring path = prefix.empty() ? m.name : prefix + "." + m.name;
+		const int64 off = base + int64(m.offset / 8);
+
+		if (m.type.is_struct()) {
+			flatten_members(m.type, path, off, out);
+			continue;
+		}
+
+		out.fields.push_back(
+			{ path, int(off), int(m.size / 8), field_kind(m.type) });
+	}
+}
+
+/*
+	Every member of a local struct type, so the layout follows the type decl
+	with no member list to keep in sync. Nested structs are flattened into
+   dotted paths
+*/
+inline bool load_layout(const char* type, layout_t& out) {
+	tinfo_t t;
+	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
+		rv_log("%s not found in local types - was types.h parsed?", type);
+		return false;
+	}
+
+	const size_t sz = t.get_size();
+	out.size = sz == BADSIZE ? 0 : int(sz);
+
+	flatten_members(t, qstring(), 0, out);
+	return !out.fields.empty();
+}
+
 } // namespace rv
