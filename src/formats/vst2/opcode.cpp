@@ -292,10 +292,14 @@ static void prepare_report(const std::vector<dispatcher_info_t>& infos) {
 		for (const qstring& s : info.can_do)
 			report::row("canDo", qstring("\"") + s + "\"");
 
+		qstring n;
+		n.sprnt("%u opcodes", unsigned(info.handled.size()));
+		report::group("handles", n);
+
 		for (const uint32 op : info.handled) {
 			qstring v;
-			v.sprnt("%s (%u)", opcode_name(op).c_str(), op);
-			report::row("handles", v);
+			v.sprnt("%u", op);
+			report::child(opcode_name(op), v);
 		}
 	}
 }
