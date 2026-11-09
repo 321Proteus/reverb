@@ -2,6 +2,7 @@
 #include "core/log.hpp"
 #include <pro.h>
 #include <bytes.hpp>
+#include "db/members.hpp"
 #include "decomp/fields.hpp"
 #include <cstring>
 #include <typeinf.hpp>
@@ -53,7 +54,8 @@ inline fkind_t field_kind(const tinfo_t& t) {
 }
 
 /*
-	Read the named members of a local struct type into out.
+	Read the named members of a local struct type into out. A member may be
+	a path into nested structs (eg. version.major).
 	Kinds follow the member type:
 	F_FN - func pointer
 	F_CSTR - pointer to string
@@ -80,20 +82,19 @@ inline bool load_layout(const char* type, const char* const* members, size_t n,
 	out.size = sz == BADSIZE ? 0 : int(sz);
 
 	for (size_t i = 0; i < n; i++) {
-		udm_t udm;
-		udm.name = members[i];
-		if (t.find_udm(&udm, STRMEM_NAME) < 0) {
+		uint64 off;
+		tinfo_t mt;
+		const size_t msz =
+			find_member(t, members[i], &off, &mt) ? mt.get_size() : BADSIZE;
+		if (msz == BADSIZE) {
 			rv_log("%s::%s missing from types.h%s", type, members[i],
 				require_all ? "" : ", skipping");
 			if (require_all) return false;
 			continue;
 		}
 
-		const fkind_t k = field_kind(udm.type);
-
-		// udm is in bits
 		out.fields.push_back(
-			{ members[i], int(udm.offset / 8), int(udm.size / 8), k });
+			{ members[i], int(off), int(msz), field_kind(mt) });
 	}
 	return !out.fields.empty();
 }
