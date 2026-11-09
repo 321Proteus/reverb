@@ -12,6 +12,7 @@
 #include "decomp/fields.hpp"
 #include "decomp/stores.hpp"
 #include "patterns/id_returns.hpp"
+#include "ui/report.hpp"
 #include <algorithm>
 #include <map>
 #include <name.hpp>
@@ -250,6 +251,7 @@ static void label_extensions(ea_t ge) {
 
 	if (uint64 n; rv::const_return(ge, &n) && n == 0) {
 		rv_log("get_extension at %a returns no extensions", ge);
+		report::row("extensions", "(none)", ge);
 		return;
 	}
 
@@ -260,6 +262,7 @@ static void label_extensions(ea_t ge) {
 	}
 	if (rets.empty()) {
 		rv_log("get_extension at %a: no id checks found", ge);
+		report::row("extensions", "(no id checks found)", ge);
 		return;
 	}
 
@@ -269,6 +272,7 @@ static void label_extensions(ea_t ge) {
 		tinfo_t tif;
 		if (kind == nullptr || !tif.get_named_type(nullptr, kind->type)) {
 			rv_log("Unknown CLAP extension \"%s\" at %a", r.id.c_str(), r.ea);
+			report::row("extension", r.id + " (unknown type)", r.ea);
 
 			qstring cmt;
 			cmt.sprnt("CLAP extension \"%s\" (type unknown)", r.id.c_str());
@@ -305,6 +309,7 @@ static void label_extensions(ea_t ge) {
 		set_cmt(h.ea, cmt.c_str(), true);
 
 		rv_log("Extension %s (\"%s\") at %a", h.kind->name, cmt.c_str(), h.ea);
+		report::row("extension", cmt, h.ea);
 	}
 
 	mark_cfunc_dirty(ge);
@@ -336,6 +341,19 @@ static void label_hit(
 
 	rv_log("Plugin instance %s from %a (%u callbacks)", prefix, h.func,
 		unsigned(h.fns.size()));
+
+	qstring title;
+	title.sprnt("CLAP instance %s", prefix);
+	report::heading(title, h.ea != BADADDR ? h.ea : h.func);
+
+	if (h.desc != nullptr) report::row("descriptor", h.desc->id, h.desc->ea);
+	if (h.ea == BADADDR) report::addr_row("built by", h.func);
+
+	// Callbacks in member order, named by now
+	for (const udm_t& m : pt.udt) {
+		auto it = h.fns.find(m.name);
+		if (it != h.fns.end()) report::addr_row(m.name, it->second);
+	}
 }
 
 void label_plugins(ea_t create_plugin_ea, const std::vector<desc_t>& descs) {
@@ -372,6 +390,11 @@ void label_plugins(ea_t create_plugin_ea, const std::vector<desc_t>& descs) {
 	if (hits.empty()) {
 		rv_log("No clap_plugin_t found from create_plugin at %a",
 			create_plugin_ea);
+
+		report::heading("CLAP instance");
+		report::row("clap_plugin_t", "(not found)");
+		report::addr_row("create_plugin", create_plugin_ea);
+
 		return;
 	}
 

@@ -8,6 +8,7 @@
 #include "decomp/stores.hpp"
 #include "db/func_iter.hpp"
 #include "db/members.hpp"
+#include "ui/report.hpp"
 #include <functional>
 #include <map>
 #include <name.hpp>
@@ -365,6 +366,19 @@ void label_descriptor(const desc_t& d) {
 
 	rv_log("Descriptor %s (\"%s\") at %a", d.id.c_str(), d.name.c_str(),
 		d.ea != BADADDR ? d.ea : d.init_ea);
+
+	qstring title, ver;
+	title.sprnt("CLAP descriptor \"%s\"", d.name.c_str());
+	ver.sprnt("%u.%u.%u", d.clap_version.major, d.clap_version.minor,
+		d.clap_version.revision);
+
+	report::heading(title, d.ea != BADADDR ? d.ea : d.init_ea);
+	report::row("id", d.id);
+	report::row("vendor", or_none(d.vendor));
+	report::row("version", or_none(d.version));
+	report::row("CLAP version", ver);
+	report::row("features", or_none(features), d.features_ea);
+	if (d.init_ea != BADADDR) report::addr_row("built by", d.init_ea);
 
 	if (d.ea != BADADDR && d.init_ea == BADADDR) {
 		object_fields_t o;
