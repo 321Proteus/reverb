@@ -19,6 +19,7 @@
 #include "frameworks/framework.hpp"
 #include "formats/vst2/vst2.hpp"
 #include "ui/panel.hpp"
+#include "ui/report.hpp"
 
 // A format probe may have loaded the types before detection ends
 static void load_types(rv::Interface iface) {
@@ -44,10 +45,29 @@ static void apply_interfaces(rv::InterfaceSet is) {
 	});
 }
 
+static void report_overview(rv::InterfaceSet is) {
+	qstring ifaces;
+	is.for_each([&](rv::Interface iface) {
+		if (!ifaces.empty()) ifaces += ", ";
+		ifaces += rv::get_interface_name(iface);
+	});
+
+	const rv::FrameworkInfo fw = rv::get_detected_framework();
+	qstring f = fw.score > 0 ? rv::get_framework_name(fw.fw) : "(none detected)";
+	if (!fw.version.empty()) f.cat_sprnt(" %s", fw.version.c_str());
+
+	rv::report::heading("Overview");
+	rv::report::row("interfaces", ifaces);
+	rv::report::row("framework", f);
+}
+
 static void run_scan(rv::InterfaceSet is) {
 
 	// skip non-plugin binaries
 	if (is.empty()) return;
+
+	rv::report::clear();
+	report_overview(is);
 
 	is.for_each([](const rv::Interface iface) {
 		const rv::FormatModule* mod = rv::get_format_module(iface);
@@ -58,6 +78,7 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::panel::show_later();
 }
 
 static ssize_t idaapi ui_event_cb(
@@ -65,6 +86,7 @@ static ssize_t idaapi ui_event_cb(
 
 	if (notification_code == ui_database_closed) {
 		rv::panel::close();
+		rv::report::clear();
 		return 0;
 	}
 
