@@ -20,6 +20,12 @@ static constexpr int MAX_INIT_FUNCS = 16;
 static constexpr int CELL_SCAN = 256; // bytes of a lazy cell searched for
 									  // its init function
 
+static layout_t desc_layout() {
+	layout_t layout;
+	load_layout("clap_plugin_descriptor_t", layout);
+	return layout;
+}
+
 // NULL-terminated array of strings
 static bool read_features(ea_t ea, qstrvec_t& out) {
 	for (int i = 0; i <= MAX_FEATURES; i++) {
@@ -164,9 +170,9 @@ static void from_stores(ea_t fn, const tinfo_t& tif, std::vector<desc_t>& out) {
 			!is_code_addr(s.val.ea))
 			bases.insert({ s.loc.var, s.loc.off - int64(id_off) });
 
-	for (const auto& [var, base] : bases) {
-		auto rd = [&](int64 off, int size, uint64& v) {
-			return stored_const(col.stores, var, base + off, size, v);
+	for (const auto& [v, base] : bases) {
+		auto rd = [&](int64 off, int size, uint64& x) {
+			return stored_const(col.stores, v, base + off, size, x);
 		};
 
 		desc_t d;
@@ -174,8 +180,21 @@ static void from_stores(ea_t fn, const tinfo_t& tif, std::vector<desc_t>& out) {
 		if (!parse_descriptor(tif, rd, d)) continue;
 
 		auto same = [&](const desc_t& o) { return o.id == d.id; };
-		if (std::none_of(out.begin(), out.end(), same))
-			out.push_back(std::move(d));
+		if (std::any_of(out.begin(), out.end(), same)) continue;
+
+		const lvars_t* lv = cf->get_lvars();
+		rv_log("  clap_plugin_descriptor_t \"%s\" built in %a at %s%+lld",
+			d.id.c_str(), fn,
+			v >= 0 && size_t(v) < lv->size() ? lv->at(v).name.c_str() : "?",
+			base);
+
+		object_fields_t o;
+		o.root = v;
+		o.base_off = base;
+
+		resolve_fields(desc_layout().fields, o, col.stores, inf_is_64bit());
+
+		out.push_back(std::move(d));
 	}
 }
 
@@ -346,6 +365,11 @@ void label_descriptor(const desc_t& d) {
 
 	rv_log("Descriptor %s (\"%s\") at %a", d.id.c_str(), d.name.c_str(),
 		d.ea != BADADDR ? d.ea : d.init_ea);
+
+	if (d.ea != BADADDR && d.init_ea == BADADDR) {
+		object_fields_t o;
+		resolve_data_fields(desc_layout().fields, d.ea, o, inf_is_64bit());
+	}
 }
 
 } // namespace rv::clap
