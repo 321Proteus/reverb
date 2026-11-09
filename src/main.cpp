@@ -18,6 +18,7 @@
 #include "formats/types_embed.hpp"
 #include "frameworks/framework.hpp"
 #include "formats/vst2/vst2.hpp"
+#include "ui/panel.hpp"
 
 // A format probe may have loaded the types before detection ends
 static void load_types(rv::Interface iface) {
@@ -61,6 +62,12 @@ static void run_scan(rv::InterfaceSet is) {
 
 static ssize_t idaapi ui_event_cb(
 	void* user_data, int notification_code, va_list va) {
+
+	if (notification_code == ui_database_closed) {
+		rv::panel::close();
+		return 0;
+	}
+
 	if (notification_code != ui_database_inited) return 0;
 
 	rv_log("Database init complete - scanning");
@@ -130,6 +137,7 @@ static plugmod_t* idaapi init(void) {
 
 	hook_to_notification_point(HT_UI, ui_event_cb, nullptr);
 	hook_to_notification_point(HT_IDB, idb_event_cb);
+	rv::panel::init();
 
 	rv_log("plugin initialized");
 
@@ -137,13 +145,14 @@ static plugmod_t* idaapi init(void) {
 }
 
 static void idaapi term(void) {
+	rv::panel::term();
 	unhook_from_notification_point(HT_UI, ui_event_cb);
 	unhook_from_notification_point(HT_IDB, idb_event_cb);
 	term_hexrays_plugin();
 }
 
 static bool idaapi run(size_t) {
-	rv_log("manually invoked");
+	rv::panel::show();
 	return true;
 }
 
