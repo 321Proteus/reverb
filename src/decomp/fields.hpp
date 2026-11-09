@@ -17,7 +17,7 @@ enum fkind_t { F_INT, F_FN, F_PTR, F_STR };
 
 // One member of a struct layout
 struct field_desc_t {
-	const char* name;
+	qstring name;
 	int off;
 	int sz;
 	fkind_t kind;

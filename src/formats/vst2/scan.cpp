@@ -167,7 +167,7 @@ void scan() {
 
 	int64 object_off = -1;
 	for (const aeffect_field_t& f : fields)
-		if (strcmp(f.name, "object") == 0) object_off = f.off;
+		if (f.name == "object") object_off = f.off;
 
 	// Some plugins share a single dispatcher between classes
 	std::map<ea_t, std::vector<dispatcher_info_t>> results;

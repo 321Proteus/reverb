@@ -198,10 +198,10 @@ void apply_aeffect(const std::vector<aeffect_field_t>& fields,
 
 		if (auto prev = named.find(ea); prev != named.end()) {
 			qstring c;
-			c.sprnt("also AEffect::%s", f.name);
+			c.sprnt("also AEffect::%s", f.name.c_str());
 			append_cmt(ea, c.c_str(), false);
 
-			rv_log("    %s -> %a (same as %s, commented)", f.name, ea,
+			rv_log("    %s -> %a (same as %s, commented)", f.name.c_str(), ea,
 				prev->second.c_str());
 			continue;
 		}
@@ -209,31 +209,31 @@ void apply_aeffect(const std::vector<aeffect_field_t>& fields,
 		// On-demand analysis: turns &unk_X into code + function.
 		if (ensure_func(ea) == nullptr) {
 			rv_log("    %s -> %a: could not create a function, skipping",
-				f.name, ea);
+				f.name.c_str(), ea);
 			continue;
 		}
 
 		// Never clobber real symbols (debug info, exports, user renames)
 		qstring nm;
-		nm.sprnt("vst2_%s%s", f.name, suffix.c_str());
+		nm.sprnt("vst2_%s%s", f.name.c_str(), suffix.c_str());
 
 		if (has_user_name(get_flags(ea))) {
 			qstring cur;
 			get_ea_name(&cur, ea);
-			rv_log("    %s -> %a: keeping existing name '%s'", f.name, ea,
+			rv_log("    %s -> %a: keeping existing name '%s'", f.name.c_str(), ea,
 				cur.c_str());
 
 		} else if (set_name(ea, nm.c_str(), SN_NOWARN | SN_FORCE)) {
-			rv_log("    %s -> %a: named %s", f.name, ea, nm.c_str());
+			rv_log("    %s -> %a: named %s", f.name.c_str(), ea, nm.c_str());
 		}
 
 		// Don't override a user-defined prototype
 		if (!is_userti(ea)) {
-			if (apply_definite_proto(ea, proto_for(f.name).c_str()))
-				rv_log("    %s -> %a: prototype applied", f.name, ea);
+			if (apply_definite_proto(ea, proto_for(f.name.c_str()).c_str()))
+				rv_log("    %s -> %a: prototype applied", f.name.c_str(), ea);
 		}
 
-		named[ea] = f.name;
+		named[ea] = f.name.c_str();
 		mark_cfunc_dirty(ea);
 	}
 

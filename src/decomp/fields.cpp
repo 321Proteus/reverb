@@ -1,4 +1,7 @@
 #include "fields.hpp"
+#include "db/read.hpp"
+#include <algorithm>
+#include <bytes.hpp>
 #include <pro.h>
 
 namespace rv {
@@ -100,10 +103,11 @@ void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 
 		auto it = o.fields.find(f.name);
 		if (it == o.fields.end())
-			rv_log("    %-22s (+%3d)  <not written here>", f.name, f.off);
+			rv_log(
+				"    %-22s (+%3d)  <not written here>", f.name.c_str(), f.off);
 		else
-			rv_log("    %-22s (+%3d)  %s   [store at %a]", f.name, f.off,
-				field_str(f, it->second.v, o, self_label).c_str(),
+			rv_log("    %-22s (+%3d)  %s   [store at %a]", f.name.c_str(),
+				f.off, field_str(f, it->second.v, o, self_label).c_str(),
 				it->second.src_ea);
 	}
 }

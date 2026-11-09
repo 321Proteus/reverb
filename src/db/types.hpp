@@ -36,7 +36,7 @@ struct layout_t {
 
 	const field_desc_t* find(const char* name) const {
 		for (const field_desc_t& f : fields)
-			if (strcmp(f.name, name) == 0) return &f;
+			if (f.name == name) return &f;
 		return nullptr;
 	}
 };

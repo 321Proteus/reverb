@@ -259,7 +259,7 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 	const size_t n = cls.fields.size();
 
 	size_t card = 0; // position of cardinality in the layout
-	while (card < n && strcmp(cls.fields[card].name, "cardinality") != 0)
+	while (card < n && cls.fields[card].name != "cardinality")
 		card++;
 	if (card == n) return;
 
@@ -284,7 +284,7 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 			const call_arg_t& a = A[first + i];
 			const loc_t at{ base.var, base.off + f.off };
 
-			if (strcmp(f.name, "cid") == 0) {
+			if (f.name == "cid") {
 				uchar raw[16] = {};
 				if (a.k == call_arg_t::OBJ) {
 					if (get_bytes(raw, 16, a.ea) != 16) continue;
@@ -299,7 +299,7 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 				col.copies.push_back(copy_of(at, a.ea, c.ea));
 			else if (f.kind == F_STR && a.k == call_arg_t::STR)
 				rv_log(
-					"    %s at %a is a cot_str with no address", f.name, c.ea);
+					"    %s at %a is a cot_str with no address", f.name.c_str(), c.ea);
 			// NUM 0 for a string is a NULL pointer: leave the field unwritten
 		}
 		return;
