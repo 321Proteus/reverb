@@ -90,28 +90,13 @@ static void run_scan(rv::InterfaceSet is) {
 	rv::panel::show_later();
 }
 
-static ssize_t idaapi ui_event_cb(
-	void* user_data, int notification_code, va_list va) {
-
-	if (notification_code == ui_database_closed) {
-		g_pending = pending_t::NONE;
-		rv::panel::close();
-		rv::report::clear();
-		return 0;
-	}
-
-	if (notification_code != ui_database_inited) return 0;
-	const bool is_new = va_arg(va, int) != 0;
-
-	rv_log("Database init complete - scanning");
-
+// Classify the format(s) and framework + load types
+static rv::InterfaceSet detect() {
 	std::vector<qstring> exports;
 	int n = get_entry_qty();
 
 	for (int i = 0; i < n; i++) {
-
 		uval_t ord = get_entry_ordinal(i);
-		ea_t ea = get_entry(ord);
 		qstring name;
 
 		get_entry_name(&name, ord);
@@ -129,6 +114,25 @@ static ssize_t idaapi ui_event_cb(
 
 	apply_interfaces(formats);
 	rv::set_detected_framework(rv::scan_framework());
+	return formats;
+}
+
+static ssize_t idaapi ui_event_cb(
+	void* user_data, int notification_code, va_list va) {
+
+	if (notification_code == ui_database_closed) {
+		g_pending = pending_t::NONE;
+		rv::panel::close();
+		rv::report::clear();
+		return 0;
+	}
+
+	if (notification_code != ui_database_inited) return 0;
+	const bool is_new = va_arg(va, int) != 0;
+
+	rv_log("Database init complete - scanning");
+
+	const rv::InterfaceSet formats = detect();
 
 	if (formats.empty()) {
 		rv_log("No supported plugin interface found, stopping");
@@ -197,8 +201,24 @@ static void idaapi term(void) {
 	term_hexrays_plugin();
 }
 
+// The Edit section button rescans the binary
 static bool idaapi run(size_t) {
-	rv::panel::show();
+	const rv::InterfaceSet formats = detect();
+
+	if (formats.empty()) {
+		rv_log("No supported plugin interface found, nothing to scan");
+		return true;
+	}
+
+	if (auto_is_ok()) {
+		rv_log("Rescanning");
+		run_scan(formats);
+		return true;
+	}
+
+	if (g_pending == pending_t::NONE) g_pending = pending_t::EMPTY;
+	rv_log("The rescan will run once the IDA analysis is finished");
+
 	return true;
 }
 
