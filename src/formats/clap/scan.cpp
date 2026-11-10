@@ -1,6 +1,4 @@
 #include "core/log.hpp"
-#include "db/read.hpp"
-#include "db/types.hpp"
 #include "clap.hpp"
 #include "factory.hpp"
 #include "descriptor.hpp"
@@ -8,6 +6,7 @@
 #include "plugin.hpp"
 #include "decomp/analysis.hpp"
 #include "db/members.hpp"
+#include "ui/report.hpp"
 #include <bytes.hpp>
 #include <cstddef>
 #include <name.hpp>
@@ -68,6 +67,11 @@ void scan() {
 	}
 
 	label_fn_table(ea, "clap_plugin_entry_t", "clap_entry");
+
+	report::heading("CLAP entry", ea);
+	for (const char* m : { "init", "deinit", "get_factory" })
+		report::addr_row(m, member_ptr(ea, tif, m));
+
 	ea_t gf_ea = member_ptr(ea, tif, "get_factory");
 
 	for (const factory_hit_t& f : find_factories(gf_ea)) {

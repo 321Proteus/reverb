@@ -105,8 +105,8 @@ void label_fn_table(ea_t ea, const char* type, const char* prefix) {
 
 qstring c_ident(const qstring& s) {
 	qstring r = s;
-	for (char& c : r)
-		if (uchar(c) > CHAR_MAX || !qisalnum(c)) c = '_';
+	for (size_t i = 0; i < r.length(); i++)
+		if (uchar(r[i]) > CHAR_MAX || !qisalnum(r[i])) r[i] = '_';
 	return r;
 }
 

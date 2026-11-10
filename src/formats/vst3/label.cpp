@@ -6,6 +6,7 @@
 #include "vst3.hpp"
 #include "finders.hpp"
 #include "decomp/analysis.hpp"
+#include "ui/report.hpp"
 
 static bool may_be_factory(ea_t vt) {
 	rv::rtti::class_info ci;
@@ -90,6 +91,12 @@ void rv::vst3::label_factory() {
 		vtbl::pin(h.vtable_ea, vtbl_type.c_str());
 		rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
 
+		qstring vt;
+		vt.sprnt("%s (%a)", vtbl_type.c_str(), h.vtable_ea);
+
+		rv::report::heading("VST3 factory object", h.vtable_ea);
+		rv::report::row("vtable", vt, h.vtable_ea);
+
 		ea_t global_ea = BADADDR;
 
 		if (is_direct) {
@@ -101,6 +108,8 @@ void rv::vst3::label_factory() {
 			cgfinder.apply_to(&cfunc->body, nullptr);
 			global_ea = cgfinder.global_ea;
 		}
+
+		rv::report::addr_row("singleton", global_ea);
 
 		if (global_ea == BADADDR) {
 			rv_log("No global found for this factory");

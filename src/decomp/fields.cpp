@@ -1,4 +1,7 @@
 #include "fields.hpp"
+#include "db/read.hpp"
+#include <algorithm>
+#include <bytes.hpp>
 #include <pro.h>
 
 namespace rv {
@@ -42,7 +45,8 @@ static qstring field_str(const field_desc_t& f, const val_t& v,
 	const object_fields_t& o, const char* self_label) {
 	qstring str, s;
 
-	if (f.kind == F_STR && v.t == val_t::ADDR && read_utf8(v.ea, str)) {
+	if ((f.kind == F_STR || f.kind == F_CSTR) && v.t == val_t::ADDR &&
+		read_utf8(v.ea, str)) {
 		s.sprnt("\"%s\"", str.c_str());
 		return s;
 	}
@@ -100,12 +104,71 @@ void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 
 		auto it = o.fields.find(f.name);
 		if (it == o.fields.end())
-			rv_log("    %-22s (+%3d)  <not written here>", f.name, f.off);
+			rv_log(
+				"    %-22s (+%3d)  <not written here>", f.name.c_str(), f.off);
 		else
-			rv_log("    %-22s (+%3d)  %s   [store at %a]", f.name, f.off,
-				field_str(f, it->second.v, o, self_label).c_str(),
+			rv_log("    %-22s (+%3d)  %s   [store at %a]", f.name.c_str(),
+				f.off, field_str(f, it->second.v, o, self_label).c_str(),
 				it->second.src_ea);
 	}
+}
+
+void resolve_data_fields(const std::vector<field_desc_t>& fields, ea_t ea,
+	object_fields_t& o, bool is64, const char* self_label) {
+
+	const int psz = is64 ? 8 : 4;
+	o.root = 0;
+	o.base_off = 0;
+
+	std::vector<store_t> stores;
+	for (const field_desc_t& f : fields) {
+
+		const ea_t at = ea + f.off;
+		if (f.sz <= 0 || !is_loaded(at) || !is_loaded(at + f.sz - 1)) continue;
+
+		store_t s;
+		s.loc = { 0, f.off };
+		s.size = f.sz;
+		s.ea = at;
+
+		if (f.kind == F_STR) {
+
+			// The characters are in place
+			s.val.t = val_t::ADDR;
+			s.val.ea = at;
+			s.size = std::max(f.sz, psz);
+
+		} else if ((f.kind == F_FN || f.kind == F_PTR || f.kind == F_CSTR) &&
+				   f.sz == psz) {
+
+			// Scanned data has no offset items
+			const ea_t p = read_ptr(at);
+			if (p != 0) {
+				s.val.t = val_t::ADDR;
+				s.val.ea = p;
+			} else {
+				s.val.t = val_t::NUM;
+			}
+
+		} else if (f.sz <= 8) {
+			s.val.t = val_t::NUM;
+			for (int i = f.sz - 1; i >= 0; i--) {
+				s.val.num = (s.val.num << 8) | get_byte(at + i);
+			}
+
+		} else if (f.sz <= int(sizeof(s.val.raw))) {
+			s.val.t = val_t::NUM;
+			s.val.raw_len = f.sz;
+			get_bytes(s.val.raw, f.sz, at);
+
+		} else {
+			continue;
+		}
+
+		stores.push_back(std::move(s));
+	}
+
+	resolve_fields(fields, o, stores, is64, self_label);
 }
 
 } // namespace rv

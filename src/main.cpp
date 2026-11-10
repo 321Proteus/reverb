@@ -18,6 +18,9 @@
 #include "formats/types_embed.hpp"
 #include "frameworks/framework.hpp"
 #include "formats/vst2/vst2.hpp"
+#include "ui/panel.hpp"
+#include "ui/report.hpp"
+#include "db/report.hpp"
 
 // A format probe may have loaded the types before detection ends
 static void load_types(rv::Interface iface) {
@@ -43,10 +46,36 @@ static void apply_interfaces(rv::InterfaceSet is) {
 	});
 }
 
+static void report_overview(rv::InterfaceSet is) {
+	qstring ifaces;
+	is.for_each([&](rv::Interface iface) {
+		if (!ifaces.empty()) ifaces += ", ";
+		ifaces += rv::get_interface_name(iface);
+	});
+
+	const rv::FrameworkInfo fw = rv::get_detected_framework();
+	qstring f =
+		fw.score > 0 ? rv::get_framework_name(fw.fw) : "(none detected)";
+	if (!fw.version.empty()) f.cat_sprnt(" %s", fw.version.c_str());
+
+	rv::report::heading("Overview");
+	rv::report::row("interfaces", ifaces);
+	rv::report::row("framework", f);
+}
+
+// Scan pending: on the first auto_empty_finally for a new database, or the
+// first auto_empty for a reopened one (it has no final pass left to run)
+enum class pending_t { NONE, FINAL, EMPTY };
+static pending_t g_pending = pending_t::NONE;
+
 static void run_scan(rv::InterfaceSet is) {
+	g_pending = pending_t::NONE;
 
 	// skip non-plugin binaries
 	if (is.empty()) return;
+
+	rv::report::clear();
+	report_overview(is);
 
 	is.for_each([](const rv::Interface iface) {
 		const rv::FormatModule* mod = rv::get_format_module(iface);
@@ -57,21 +86,17 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::store_report(rv::report::entries());
+	rv::panel::show_later();
 }
 
-static ssize_t idaapi ui_event_cb(
-	void* user_data, int notification_code, va_list va) {
-	if (notification_code != ui_database_inited) return 0;
-
-	rv_log("Database init complete - scanning");
-
+// Classify the format(s) and framework + load types
+static rv::InterfaceSet detect() {
 	std::vector<qstring> exports;
 	int n = get_entry_qty();
 
 	for (int i = 0; i < n; i++) {
-
 		uval_t ord = get_entry_ordinal(i);
-		ea_t ea = get_entry(ord);
 		qstring name;
 
 		get_entry_name(&name, ord);
@@ -89,15 +114,42 @@ static ssize_t idaapi ui_event_cb(
 
 	apply_interfaces(formats);
 	rv::set_detected_framework(rv::scan_framework());
+	return formats;
+}
+
+static ssize_t idaapi ui_event_cb(
+	void* user_data, int notification_code, va_list va) {
+
+	if (notification_code == ui_database_closed) {
+		g_pending = pending_t::NONE;
+		rv::panel::close();
+		rv::report::clear();
+		return 0;
+	}
+
+	if (notification_code != ui_database_inited) return 0;
+	const bool is_new = va_arg(va, int) != 0;
+
+	rv_log("Database init complete - scanning");
+
+	const rv::InterfaceSet formats = detect();
 
 	if (formats.empty()) {
 		rv_log("No supported plugin interface found, stopping");
 		return 0;
 	} else {
-		if (auto_is_ok()) {
+		std::vector<rv::report::report_entry_t> stored;
+
+		if (!is_new && rv::load_report(stored)) {
+			rv::report::assign(std::move(stored));
+			rv_log("Loaded the plugin info saved in the database");
+
+		} else if (auto_is_ok()) {
 			rv_log("Analysis already performed, scanning now");
 			run_scan(formats);
+
 		} else {
+			g_pending = is_new ? pending_t::FINAL : pending_t::EMPTY;
 			rv_log(
 				"The metadata scan will run once the IDA "
 				"analysis is finished. You can start browsing the file now.");
@@ -110,7 +162,12 @@ static ssize_t idaapi ui_event_cb(
 static ssize_t idaapi idb_event_cb(
 	void* user_data, int notification_code, va_list va) {
 
-	if (notification_code != idb_event::auto_empty_finally) return 0;
+	const bool ready = (notification_code == idb_event::auto_empty_finally &&
+						   g_pending != pending_t::NONE) ||
+					   (notification_code == idb_event::auto_empty &&
+						   g_pending == pending_t::EMPTY);
+
+	if (!ready) return 0;
 
 	run_scan(rv::get_detected_interfaces());
 
@@ -130,6 +187,7 @@ static plugmod_t* idaapi init(void) {
 
 	hook_to_notification_point(HT_UI, ui_event_cb, nullptr);
 	hook_to_notification_point(HT_IDB, idb_event_cb);
+	rv::panel::init();
 
 	rv_log("plugin initialized");
 
@@ -137,13 +195,30 @@ static plugmod_t* idaapi init(void) {
 }
 
 static void idaapi term(void) {
+	rv::panel::term();
 	unhook_from_notification_point(HT_UI, ui_event_cb);
 	unhook_from_notification_point(HT_IDB, idb_event_cb);
 	term_hexrays_plugin();
 }
 
+// The Edit section button rescans the binary
 static bool idaapi run(size_t) {
-	rv_log("manually invoked");
+	const rv::InterfaceSet formats = detect();
+
+	if (formats.empty()) {
+		rv_log("No supported plugin interface found, nothing to scan");
+		return true;
+	}
+
+	if (auto_is_ok()) {
+		rv_log("Rescanning");
+		run_scan(formats);
+		return true;
+	}
+
+	if (g_pending == pending_t::NONE) g_pending = pending_t::EMPTY;
+	rv_log("The rescan will run once the IDA analysis is finished");
+
 	return true;
 }
 

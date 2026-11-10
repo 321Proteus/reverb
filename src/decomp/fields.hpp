@@ -1,7 +1,6 @@
 #pragma once
 
 #include "stores.hpp"
-#include <cstring>
 #include <map>
 #include <vector>
 
@@ -13,11 +12,11 @@ struct field_val_t {
 
 namespace rv {
 
-enum fkind_t { F_INT, F_FN, F_PTR, F_STR };
+enum fkind_t { F_INT, F_FN, F_PTR, F_STR, F_CSTR };
 
 // One member of a struct layout
 struct field_desc_t {
-	const char* name;
+	qstring name;
 	int off;
 	int sz;
 	fkind_t kind;
@@ -42,4 +41,13 @@ qstring val_str(
 void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 	const std::vector<store_t>& stores, bool is64,
 	const char* self_label = "this");
+
+/*
+	resolve_fields for an object initialized at ea: each member is
+	read from the IDB as if it was stored. o.root and o.base_off are
+	overwritten
+*/
+void resolve_data_fields(const std::vector<field_desc_t>& fields, ea_t ea,
+	object_fields_t& o, bool is64, const char* self_label = "this");
+
 } // namespace rv

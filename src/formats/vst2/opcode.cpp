@@ -1,11 +1,11 @@
 #include "opcode.hpp"
+#include "ui/report.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "decomp/ctree.hpp"
 #include "decomp/analysis.hpp"
 #include "patterns/dispatch.hpp"
 #include "decomp/stores.hpp"
-#include "cxx/vtable.hpp"
 #include <algorithm>
 #include <bytes.hpp>
 #include <funcs.hpp>
@@ -260,6 +260,50 @@ bool analyze_dispatcher(
 	return !out.handled.empty();
 }
 
+static void prepare_report(const std::vector<dispatcher_info_t>& infos) {
+	const dispatcher_info_t& first = infos.front();
+
+	report::heading("VST2 dispatcher", first.dispatcher);
+	report::addr_row("dispatcher", first.dispatcher);
+	if (first.switch_func != BADADDR && first.switch_func != first.dispatcher)
+		report::addr_row("opcode switch", first.switch_func);
+
+	for (const dispatcher_info_t& info : infos) {
+		if (info.vtable != BADADDR) {
+			qstring o;
+			o.sprnt("%s (vtable %a)",
+				info.class_name.empty() ? "?" : info.class_name.c_str(),
+				info.vtable);
+			report::row("plugin object", o, info.vtable);
+		}
+
+		for (const auto& [op, s] : info.strings)
+			report::row(opcode_name(op), qstring("\"") + s + "\"");
+
+		for (const auto& [op, v] : info.consts) {
+			qstring val;
+			if (op == EFF_GET_PLUG_CATEGORY)
+				val.sprnt("%s (%llu)", category_name(v), (unsigned long long)v);
+			else
+				val.sprnt("%llu", (unsigned long long)v);
+			report::row(opcode_name(op), val);
+		}
+
+		for (const qstring& s : info.can_do)
+			report::row("canDo", qstring("\"") + s + "\"");
+
+		qstring n;
+		n.sprnt("%u opcodes", unsigned(info.handled.size()));
+		report::group("handles", n);
+
+		for (const uint32 op : info.handled) {
+			qstring v;
+			v.sprnt("%u", op);
+			report::child(opcode_name(op), v);
+		}
+	}
+}
+
 void apply_dispatcher(const std::vector<dispatcher_info_t>& infos) {
 	if (infos.empty()) return;
 	const dispatcher_info_t& first = infos.front();
@@ -312,6 +356,7 @@ void apply_dispatcher(const std::vector<dispatcher_info_t>& infos) {
 	}
 
 	rv_log("  %s", c.c_str());
+	prepare_report(infos);
 }
 
 } // namespace rv::vst2
