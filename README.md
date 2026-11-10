@@ -86,9 +86,12 @@ git clone https://github.com/free-audio/clap
 python3 tools/clap_decls.py --sdk clap \
     --types src/formats/clap/types.h \
     --exts src/formats/clap/exts.inc
+
+cmake -B build -S .  # reconfigure to embed the new files
 ```
 
 Each generator re-parses its own output for every target ABI and compares struct sizes, field offsets and (for CLAP) field types and enum constants against the source headers.
+VST2 type declarations are not generated - please read the note in `src/formats/vst2/types.h`.
 
 ## Contributing
 
@@ -106,8 +109,5 @@ We encourage all potential contributors to use whatever code generation systems 
 
 REverb is released under the [GNU General Public License v3.0](LICENSE).
 
-The generated declaration files are derived from Steinberg's VST3 `pluginterfaces`
-and the CLAP headers, both MIT-licensed. See their repositories for their notices.
-The VST2 declarations are derived from various sources, mostly [Score's vst-compat](https://github.com/ossia/score/blob/master/src/plugins/score-plugin-vst/Vst/vst-compat.hpp) which I believe are clean-room reimplementation of the original SDK headers.
-Building requires the Hex-Rays IDA SDK, which is not included and is subject to its
-own license.
+The generated declaration files are derived from Steinberg's VST3 `pluginterfaces` and the CLAP headers, both MIT-licensed. See their repositories for their notices.
+Building requires the Hex-Rays IDA SDK, which is not included and is subject to its own license.
