@@ -84,11 +84,49 @@ struct factory_collector_t : public store_collector_t {
 		copies.push_back(std::move(c));
 	}
 
+	// strcpy(v6, "https://...") / memcpy(v6, "...", n): a string copied
+	// into a local char array
+	void add_str_copy(cexpr_t* e) {
+		cexpr_t* fn = strip_casts(e->x);
+		if (fn->op != cot_helper || !e->a || e->a->size() < 2) return;
+
+		const qstring n = fn->helper;
+		if (n != "strcpy" && n != "strncpy" && n != "memcpy" &&
+			n != "qmemcpy" && n != "strcpy_s")
+			return;
+
+		store_t c;
+		cexpr_t* dst = strip_casts(&e->a->at(0));
+		if (dst->op == cot_ref) dst = strip_casts(dst->x);
+		if (!fold_addr(dst, &alias, c.loc)) return;
+
+		cexpr_t* src = strip_casts(&e->a->at(1));
+		if (src->op == cot_ref) src = strip_casts(src->x);
+
+		if (src->op == cot_str && src->string != nullptr) {
+			c.val.t = val_t::STR; // literals have no address
+			c.val.str = src->string;
+		} else if (src->op == cot_obj) {
+			c.val.t = val_t::ADDR;
+			c.val.ea = src->obj_ea;
+		} else {
+			return;
+		}
+
+		c.ea = e->ea;
+		c.text = expr_str(e, cf);
+		copies.push_back(std::move(c));
+	}
+
 	int idaapi visit_expr(cexpr_t* e) override {
+
+		if (e->op == cot_call) add_str_copy(e);
+
 		if (e->op == cot_sub) {
 			add_copy(e);
 			return 0;
 		}
+
 		if (e->op == cot_asg) {
 			cexpr_t* lhs = strip_casts(e->x);
 			if (lhs->op == cot_obj) {
@@ -96,6 +134,7 @@ struct factory_collector_t : public store_collector_t {
 				return 0;
 			}
 		}
+
 		return store_collector_t::visit_expr(e);
 	}
 };
@@ -136,6 +175,8 @@ std::vector<store_t> stores_for(const factory_collector_t& col,
 qstring base_str(const factory_struct_t& h) {
 	qstring s;
 	if (h.root == GLOBAL_ROOT) s.sprnt("%a", ea_t(h.base_off));
+	else if (h.root == FRAME_ROOT)
+		s.sprnt("frame%+lld", (long long)h.base_off);
 	else
 		s.sprnt("var%d%+lld", h.root, (long long)h.base_off);
 	return s;
@@ -174,9 +215,7 @@ void find_class_infos(
 
 		// Rejects a plain INT_MAX stored in the same function
 		qstring category;
-		auto c = h.fields.find("category");
-		if (c == h.fields.end() || c->second.v.t != val_t::ADDR ||
-			!read_utf8(c->second.v.ea, category) || category.empty()) {
+		if (!str_field(h, "category", category) || category.empty()) {
 			rv_log("  -> rejected: category is not a constant string");
 			continue;
 		}
@@ -391,14 +430,23 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 
 	find_class_infos(col, out);
 	find_factory_infos(col, out);
+
+	// A PFactoryInfo on the stack, split into one lvar per member
+	factory_collector_t frame(cf);
+	frame.stores = frame_view(cf, col.stores);
+	frame.copies = frame_view(cf, col.copies);
+	find_factory_infos(frame, out);
 	return out;
 }
 
 bool str_field(const factory_struct_t& s, const char* f, qstring& out) {
 	auto it = s.fields.find(f);
 
-	return it != s.fields.end() && it->second.v.t == val_t::ADDR &&
-		   read_utf8(it->second.v.ea, out);
+	if (it == s.fields.end()) return false;
+
+	const val_t& v = it->second.v;
+	if (v.t == val_t::STR) out = v.str;
+	return v.t == val_t::STR || (v.t == val_t::ADDR && read_utf8(v.ea, out));
 }
 
 bool num_field(const factory_struct_t& s, const char* f, uint64& out) {

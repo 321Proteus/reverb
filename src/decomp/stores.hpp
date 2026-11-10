@@ -20,12 +20,13 @@ struct loc_t {
 
 // What was stored in a memory location
 struct val_t {
-	enum val_type_t { UNKNOWN, NUM, ADDR, LOCAL } t = UNKNOWN;
+	enum val_type_t { UNKNOWN, NUM, ADDR, LOCAL, STR } t = UNKNOWN;
 	uint64 num = 0;
 	ea_t ea = BADADDR;
 	loc_t loc;
 	uchar raw[16] = {};
 	int raw_len = 0;
+	qstring str;
 };
 
 // A single store
@@ -99,6 +100,23 @@ bool const_load(cexpr_t* e, ea_t& src);
 
 // Load a complete multi-byte stored constant
 bool read_const(ea_t src, int size, val_t& v);
+
+/*
+	Hex-Rays splits a struct built on the stack into one lvar per member.
+	In frame terms they share FRAME_ROOT, at their stack offsets, so the
+	members line up again
+*/
+inline constexpr int FRAME_ROOT = -2;
+
+// var is stack storage of its own: not a pointer to the object
+bool is_frame_object(const cfunc_t* cf, int var);
+
+// loc in lvar terms -> loc in frame terms
+bool frame_loc(const cfunc_t* cf, loc_t& l);
+
+// The stores into frame objects, moved to FRAME_ROOT
+std::vector<store_t> frame_view(
+	const cfunc_t* cf, const std::vector<store_t>& stores);
 
 struct store_collector_t : public ctree_visitor_t {
 	const cfunc_t* cf;
@@ -216,6 +234,21 @@ struct store_collector_t : public ctree_visitor_t {
 					sse_low[var] = low;
 				else
 					sse_low.erase(var);
+
+				// v29 = 16 may be a member of a split stack struct
+				const size_t sz = lhs->type.get_size();
+				if (sz != BADSIZE && sz > 0 && sz <= 8 &&
+					is_frame_object(cf, var)) {
+
+					store_t s;
+					s.loc = loc_t{ var, 0 };
+					s.size = int(sz);
+					s.ea = e->ea;
+					s.text = expr_str(e, cf);
+
+					add_store(std::move(s), e->y);
+				}
+
 				return 0;
 			}
 		}

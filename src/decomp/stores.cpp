@@ -233,3 +233,26 @@ bool inline_string(const std::vector<store_t>& stores, int var, qstring& out) {
 		out += char(buf[i]);
 	return out.length() >= 2 && is_text(out);
 }
+
+bool is_frame_object(const cfunc_t* cf, int var) {
+	const lvars_t& lv = cf->mba->vars;
+	if (var < 0 || size_t(var) >= lv.size()) return false;
+
+	const lvar_t& v = lv[var];
+	return v.is_stk_var() && !v.type().is_ptr();
+}
+
+bool frame_loc(const cfunc_t* cf, loc_t& l) {
+	if (!is_frame_object(cf, l.var)) return false;
+
+	l = loc_t{ FRAME_ROOT, int64(cf->mba->vars[l.var].get_stkoff()) + l.off };
+	return true;
+}
+
+std::vector<store_t> frame_view(
+	const cfunc_t* cf, const std::vector<store_t>& stores) {
+	std::vector<store_t> out;
+	for (store_t s : stores)
+		if (frame_loc(cf, s.loc)) out.push_back(std::move(s));
+	return out;
+}

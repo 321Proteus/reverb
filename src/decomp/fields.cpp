@@ -35,7 +35,9 @@ qstring val_str(
 			s.sprnt("var%d%+lld", v.loc.var, (long long)v.loc.off);
 		break;
 
-	default: s = "<runtime value>"; break;
+	case val_t::STR: s.sprnt("\"%s\"", v.str.c_str()); break;
+
+	default:		 s = "<runtime value>"; break;
 	}
 
 	return s;
@@ -97,6 +99,8 @@ void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 
 			} else if (v.t == val_t::ADDR || v.t == val_t::LOCAL) {
 				if (rel != 0 || s.size < psz) continue;
+			} else if (v.t == val_t::STR && rel != 0) {
+				continue;
 			}
 
 			o.fields[f.name] = { v, s.ea };
