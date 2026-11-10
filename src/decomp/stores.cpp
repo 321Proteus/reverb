@@ -1,4 +1,5 @@
 #include "decomp/stores.hpp"
+#include "decomp/sse.hpp"
 
 int64 scaled_off(const cexpr_t* e, int64 k) {
 	tinfo_t t = e->type;
@@ -150,24 +151,8 @@ bool const_load(cexpr_t* e, ea_t& src) {
 		return true;
 	}
 
-	if (e->op == cot_call && e->a && e->a->size() == 1) {
-
-		cexpr_t* fn = strip_casts(e->x);
-		qstring name;
-		if (fn->op == cot_helper) name = fn->helper;
-
-		if (name == "_mm_load_si128" || name == "_mm_loadu_si128") {
-
-			cexpr_t* a = strip_casts(&e->a->at(0));
-			if (a->op == cot_ref) a = strip_casts(a->x);
-
-			if (a->op == cot_obj && !is_code_addr(a->obj_ea)) {
-				src = a->obj_ea;
-				return true;
-			}
-		}
-	}
-	return false;
+	// _mm_load_si128(&xmmword_X)
+	return sse_load_src(e, false, src) && !is_code_addr(src);
 }
 
 bool read_const(ea_t src, int size, val_t& v) {

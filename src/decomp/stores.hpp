@@ -4,6 +4,7 @@
 #include "db/segments.hpp"
 #include "db/read.hpp"
 #include "ctree.hpp"
+#include "sse.hpp"
 #include <algorithm>
 #include <bytes.hpp>
 #include <hexrays.hpp>
@@ -102,6 +103,7 @@ bool read_const(ea_t src, int size, val_t& v);
 struct store_collector_t : public ctree_visitor_t {
 	const cfunc_t* cf;
 	alias_map_t alias;
+	std::map<int, val_t> sse_low; // SSE local -> value of its low 8 bytes
 	std::vector<store_t> stores;
 
 	store_collector_t(const cfunc_t* f) : ctree_visitor_t(CV_FAST), cf(f) {}
@@ -162,18 +164,58 @@ struct store_collector_t : public ctree_visitor_t {
 		}
 	}
 
+	/*
+		The low 8 bytes of an SSE value holding a single scalar:
+		_mm_loadl_epi64(&off_X) loads the pointer stored at off_X,
+		(__m128i)(unsigned __int64)sub_X holds sub_X
+	*/
+	val_t low_qword(cexpr_t* e) {
+		e = strip_casts(e);
+		if (e == nullptr) return {};
+
+		if (e->op == cot_var) {
+			auto it = sse_low.find(e->v.idx);
+			return it != sse_low.end() ? it->second : val_t{};
+		}
+
+		if (ea_t src; sse_load_src(e, true, src)) {
+			val_t v;
+			if (ea_t t; load_ptr_const(src, t)) {
+				v.t = val_t::ADDR;
+				v.ea = t;
+			}
+			return v;
+		}
+
+		if (e->type.get_size() > 8) return {}; // still a whole vector
+		return value_of(e);
+	}
+
 	int idaapi visit_expr(cexpr_t* e) override {
+		if (e->op == cot_call) {
+			collect_sse_store(e);
+			return 0;
+		}
 		if (e->op != cot_asg && e->op != cot_asgbor) return 0;
 
 		// Alias tracking vX = (addr expr)
 		if (e->op == cot_asg) {
 			cexpr_t* lhs = strip_casts(e->x);
 			if (lhs->op == cot_var) {
+				const int var = lhs->v.idx;
 				loc_t l;
-				if (fold_addr(e->y, &alias, l) && l.var != lhs->v.idx)
-					alias[lhs->v.idx] = l; // e.g. v3 = a1 + 48
+				if (fold_addr(e->y, &alias, l) && l.var != var)
+					alias[var] = l; // e.g. v3 = a1 + 48
 				else
-					alias.erase(lhs->v.idx); // reassigned to something else
+					alias.erase(var); // reassigned to something else
+
+				// e.g. v14 = _mm_loadl_epi64(&off_X)
+				val_t low;
+				if (lhs->type.get_size() == 16 &&
+					(low = low_qword(e->y)).t != val_t::UNKNOWN)
+					sse_low[var] = low;
+				else
+					sse_low.erase(var);
 				return 0;
 			}
 		}
@@ -181,10 +223,52 @@ struct store_collector_t : public ctree_visitor_t {
 		store_t s;
 		if (!fold_lvalue(e->x, &alias, s.loc, s.size)) return 0;
 
-		s.val = value_of(e->y);
 		s.is_or = (e->op == cot_asgbor);
 		s.ea = e->ea;
 		s.text = expr_str(e, cf);
+		add_store(std::move(s), e->y);
+		return 0;
+	}
+
+	// _mm_storeu_si128((__m128i *)(a1 + 16), _mm_load_si128(&xmmword_X))
+	void collect_sse_store(cexpr_t* e) {
+		store_t s;
+		cexpr_t *ptr, *value;
+		if (!sse_store(e, ptr, value, s.size) ||
+			!fold_addr(strip_casts(ptr), &alias, s.loc))
+			return;
+
+		s.ea = e->ea;
+		s.text = expr_str(e, cf);
+		add_store(std::move(s), value);
+	}
+
+	/*
+		Records s with the value of y. Shared by assignments and store
+		intrinsics, s has everything but the value set
+	*/
+	void add_store(store_t s, cexpr_t* y) {
+		/*
+			Two 8-byte values written at once, e.g. two adjacent pointers:
+			*(__m128i *)(p + 8) = _mm_unpacklo_epi64(v14, (__m128i)sub_X)
+		*/
+		cexpr_t *lo, *hi;
+		if (!s.is_or && s.size == 16 && sse_unpacklo64(y, lo, hi)) {
+			s.size = 8;
+			for (cexpr_t* half : { lo, hi }) {
+				store_t h = s;
+				h.val = low_qword(half);
+				stores.push_back(std::move(h));
+				s.loc.off += 8;
+			}
+			return;
+		}
+
+		s.val = value_of(y);
+
+		// The low part of an SSE value, _mm_storel_epi64(p, v14)
+		if (s.val.t == val_t::UNKNOWN && !s.is_or && s.size <= 8)
+			s.val = low_qword(y);
 
 		/*
 			Wide constant copied out of data, e.g.
@@ -197,14 +281,12 @@ struct store_collector_t : public ctree_visitor_t {
 		if (s.val.t == val_t::UNKNOWN && !s.is_or &&
 			s.size <= int(sizeof(s.val.raw))) {
 			ea_t src = BADADDR;
-			if (const_load(e->y, src) && read_const(src, s.size, s.val)) {
+			if (const_load(y, src) && read_const(src, s.size, s.val))
 				rv_log(
-					"  const load: %d bytes from %a at %a", s.size, src, e->ea);
-			}
+					"  const load: %d bytes from %a at %a", s.size, src, s.ea);
 		}
 
 		stores.push_back(std::move(s));
-		return 0;
 	}
 };
 
