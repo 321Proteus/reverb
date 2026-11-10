@@ -7,9 +7,12 @@
 #include "db/members.hpp"
 #include "db/read.hpp"
 #include "db/segments.hpp"
+#include "db/types.hpp"
 #include "decomp/analysis.hpp"
+#include "decomp/fields.hpp"
 #include "decomp/stores.hpp"
 #include "patterns/id_returns.hpp"
+#include "ui/report.hpp"
 #include <algorithm>
 #include <map>
 #include <name.hpp>
@@ -24,6 +27,7 @@ static constexpr int MAX_DEPTH = 2;
 struct plugin_type_t {
 	tinfo_t tif;
 	udt_type_data_t udt;
+	layout_t layout; // for the field dump
 	int64 desc_off = 0;
 };
 
@@ -79,14 +83,36 @@ static plugin_hit_t from_stores(const plugin_type_t& pt,
 	return h;
 }
 
-static void add_hit(std::vector<plugin_hit_t>& out, plugin_hit_t&& h) {
+// False when an instance with the same callbacks was already found
+static bool add_hit(std::vector<plugin_hit_t>& out, plugin_hit_t&& h) {
 	auto it = std::find_if(out.begin(), out.end(),
 		[&](const plugin_hit_t& o) { return o.fns == h.fns; });
 
-	if (it == out.end()) out.push_back(std::move(h));
+	if (it == out.end()) {
+		out.push_back(std::move(h));
+		return true;
+	}
 
-	else if (it->desc == nullptr)
-		h.desc = it->desc;
+	if (it->desc == nullptr) it->desc = h.desc;
+	return false;
+}
+
+// What each clap_plugin_t member was set to, as VST2 does for AEffect
+static void dump_stores(const plugin_type_t& pt, cfunc_t* cf,
+	const std::vector<store_t>& stores, int var, int64 base) {
+
+	const lvars_t* lv = cf->get_lvars();
+	const qstring root =
+		var >= 0 && size_t(var) < lv->size() ? lv->at(var).name : qstring("?");
+
+	rv_log("  clap_plugin_t built in %a at %s%+lld", cf->entry_ea, root.c_str(),
+		(long long)base);
+
+	object_fields_t o;
+	o.root = var;
+	o.base_off = base;
+
+	resolve_fields(pt.layout.fields, o, stores, inf_is_64bit(), "this");
 }
 
 /*
@@ -123,10 +149,11 @@ static void scan_func(cfunc_t* cf, const plugin_type_t& pt,
 		if (h.fns.size() < 2) continue;
 
 		h.func = cf->entry_ea;
-		add_hit(out, std::move(h));
+		if (add_hit(out, std::move(h)))
+			dump_stores(pt, cf, col.stores, var, base);
 	}
 
-	std::map<int, plugin_hit_t> best; // per var
+	std::map<int, std::pair<int64, plugin_hit_t>> best; // base and hit per var
 
 	for (const auto& [var, base] : shaped) {
 
@@ -134,13 +161,15 @@ static void scan_func(cfunc_t* cf, const plugin_type_t& pt,
 		if (int(h.fns.size()) < MIN_FNS) continue;
 
 		auto it = best.find(var);
-		if (it == best.end() || h.fns.size() > it->second.fns.size())
-			best[var] = std::move(h);
+		if (it == best.end() || h.fns.size() > it->second.second.fns.size())
+			best[var] = { base, std::move(h) };
 	}
 
-	for (auto& [var, h] : best) {
+	for (auto& [var, bh] : best) {
+		auto& [base, h] = bh;
 		h.func = cf->entry_ea;
-		add_hit(out, std::move(h));
+		if (add_hit(out, std::move(h)))
+			dump_stores(pt, cf, col.stores, var, base);
 	}
 }
 
@@ -167,7 +196,13 @@ static void static_templates(
 					h.fns[m.name] = read_ptr(t + m.offset / 8);
 			}
 
-			add_hit(out, std::move(h));
+			if (!add_hit(out, std::move(h))) continue;
+
+			rv_log("  static clap_plugin_t at %a, referenced from %a", t,
+				pfn->start_ea);
+
+			object_fields_t o;
+			resolve_data_fields(pt.layout.fields, t, o, inf_is_64bit());
 		}
 	}
 }
@@ -216,6 +251,7 @@ static void label_extensions(ea_t ge) {
 
 	if (uint64 n; rv::const_return(ge, &n) && n == 0) {
 		rv_log("get_extension at %a returns no extensions", ge);
+		report::row("extensions", "(none)", ge);
 		return;
 	}
 
@@ -226,6 +262,7 @@ static void label_extensions(ea_t ge) {
 	}
 	if (rets.empty()) {
 		rv_log("get_extension at %a: no id checks found", ge);
+		report::row("extensions", "(no id checks found)", ge);
 		return;
 	}
 
@@ -235,6 +272,7 @@ static void label_extensions(ea_t ge) {
 		tinfo_t tif;
 		if (kind == nullptr || !tif.get_named_type(nullptr, kind->type)) {
 			rv_log("Unknown CLAP extension \"%s\" at %a", r.id.c_str(), r.ea);
+			report::row("extension", r.id + " (unknown type)", r.ea);
 
 			qstring cmt;
 			cmt.sprnt("CLAP extension \"%s\" (type unknown)", r.id.c_str());
@@ -271,6 +309,7 @@ static void label_extensions(ea_t ge) {
 		set_cmt(h.ea, cmt.c_str(), true);
 
 		rv_log("Extension %s (\"%s\") at %a", h.kind->name, cmt.c_str(), h.ea);
+		report::row("extension", cmt, h.ea);
 	}
 
 	mark_cfunc_dirty(ge);
@@ -302,6 +341,19 @@ static void label_hit(
 
 	rv_log("Plugin instance %s from %a (%u callbacks)", prefix, h.func,
 		unsigned(h.fns.size()));
+
+	qstring title;
+	title.sprnt("CLAP instance %s", prefix);
+	report::heading(title, h.ea != BADADDR ? h.ea : h.func);
+
+	if (h.desc != nullptr) report::row("descriptor", h.desc->id, h.desc->ea);
+	if (h.ea == BADADDR) report::addr_row("built by", h.func);
+
+	// Callbacks in member order, named by now
+	for (const udm_t& m : pt.udt) {
+		auto it = h.fns.find(m.name);
+		if (it != h.fns.end()) report::addr_row(m.name, it->second);
+	}
 }
 
 void label_plugins(ea_t create_plugin_ea, const std::vector<desc_t>& descs) {
@@ -311,7 +363,8 @@ void label_plugins(ea_t create_plugin_ea, const std::vector<desc_t>& descs) {
 
 	if (!pt.tif.get_named_type(nullptr, "clap_plugin_t") ||
 		!pt.tif.get_udt_details(&pt.udt) ||
-		!find_member(pt.tif, "desc", &off, nullptr))
+		!find_member(pt.tif, "desc", &off, nullptr) ||
+		!load_layout("clap_plugin_t", pt.layout))
 		return;
 
 	pt.desc_off = int64(off);
@@ -337,6 +390,11 @@ void label_plugins(ea_t create_plugin_ea, const std::vector<desc_t>& descs) {
 	if (hits.empty()) {
 		rv_log("No clap_plugin_t found from create_plugin at %a",
 			create_plugin_ea);
+
+		report::heading("CLAP instance");
+		report::row("clap_plugin_t", "(not found)");
+		report::addr_row("create_plugin", create_plugin_ea);
+
 		return;
 	}
 

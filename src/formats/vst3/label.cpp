@@ -6,6 +6,7 @@
 #include "vst3.hpp"
 #include "finders.hpp"
 #include "decomp/analysis.hpp"
+#include "ui/report.hpp"
 
 static bool may_be_factory(ea_t vt) {
 	rv::rtti::class_info ci;
@@ -20,14 +21,10 @@ static bool may_be_factory(ea_t vt) {
 }
 
 void rv::vst3::label_factory() {
-	ea_t gpf_ea = get_name_ea(BADADDR, "GetPluginFactory");
+	const ea_t gpf_ea = find_get_plugin_factory();
 	if (gpf_ea == BADADDR) {
-		gpf_ea = get_name_ea(BADADDR, "_GetPluginFactory");
-
-		if (gpf_ea == BADADDR) {
-			rv_log("GetPluginFactory not found");
-			return;
-		}
+		rv_log("GetPluginFactory not found");
+		return;
 	}
 
 	func_t* pfn = rv::ensure_func(gpf_ea);
@@ -82,17 +79,23 @@ void rv::vst3::label_factory() {
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
-		const qstring type = vtbl::pick_type(
+		const qstring vtbl_type = vtbl::pick_type(
 			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
 							 "IPluginFactory_vtbl" });
 
-		if (type.empty()) {
+		if (vtbl_type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
 			continue;
 		}
 
-		vtbl::pin(h.vtable_ea, type.c_str());
+		vtbl::pin(h.vtable_ea, vtbl_type.c_str());
 		rv_log("Found IPluginFactory vtable at %a", h.vtable_ea);
+
+		qstring vt;
+		vt.sprnt("%s (%a)", vtbl_type.c_str(), h.vtable_ea);
+
+		rv::report::heading("VST3 factory object", h.vtable_ea);
+		rv::report::row("vtable", vt, h.vtable_ea);
 
 		ea_t global_ea = BADADDR;
 
@@ -106,13 +109,18 @@ void rv::vst3::label_factory() {
 			global_ea = cgfinder.global_ea;
 		}
 
+		rv::report::addr_row("singleton", global_ea);
+
 		if (global_ea == BADADDR) {
 			rv_log("No global found for this factory");
 			continue;
-		}
+		};
+
+		int idx = qisdigit(vtbl_type.at(14)) ? 15 : 14;
+		qstring type = vtbl_type.substr(0, idx);
 
 		tinfo_t ti;
-		if (!ti.get_named_type(nullptr, "IPluginFactory")) {
+		if (!ti.get_named_type(nullptr, type.c_str())) {
 			rv_log("IPluginFactory type missing");
 			continue;
 		}

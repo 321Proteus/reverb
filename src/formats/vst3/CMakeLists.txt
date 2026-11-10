@@ -1,4 +1,7 @@
 target_sources(reverb PRIVATE
+    classes.cpp
+    factory.cpp
+    factory.hpp
     finders.hpp
     iids.inc
     label.cpp

@@ -13,13 +13,14 @@
 #include <pro.h>
 #include <search.hpp>
 #include <bytes.hpp>
-#include <cstring>
 #include <segment.hpp>
 #include <map>
 #include <set>
 #include <utility>
 #include <ua.hpp>
 #include "db/func_iter.hpp"
+#include "db/types.hpp"
+#include "ui/report.hpp"
 
 // Calls cb(ea) for every aligned occurrence of x in the loaded
 // image, excluding matches that sit inside instructions (find_imm already
@@ -116,48 +117,6 @@ static void find_candidates(std::set<ea_t>& funcs) {
 
 namespace rv::vst2 {
 
-static bool load_aeffect_layout(
-	std::vector<aeffect_field_t>& out, int& total_size) {
-	tinfo_t t;
-	if (!t.get_named_type(get_idati(), "AEffect") || !t.is_struct()) {
-		rv_log("AEffect type not found in local types - was types.h parsed?");
-		return false;
-	}
-
-	size_t sz = t.get_size();
-	const int expected = inf_is_64bit() ? 192 : 144;
-	if (sz == BADSIZE || int(sz) != expected) {
-		rv_log("AEffect is %d bytes, expected %d - check types.h declarations",
-			sz == BADSIZE ? -1 : int(sz), expected);
-		return false;
-	}
-
-	total_size = int(sz);
-
-	for (const char* name : members) {
-		udm_t udm;
-		udm.name = name;
-
-		if (t.find_udm(&udm, STRMEM_NAME) < 0) {
-			rv_log("AEffect::%s missing from types.h, skipping", name);
-			continue;
-		}
-
-		fkind_t k = udm.type.is_funcptr() ? F_FN
-					: udm.type.is_ptr()	  ? F_PTR
-										  : F_INT;
-		out.push_back({ name, int(udm.offset / 8), int(udm.size / 8),
-			k }); // udm is in bits
-
-		// rv_log("  layout: %-22s +%-3d size %d %s", name, int(udm.offset / 8),
-		// 	int(udm.size / 8),
-		// 	k == F_FN	 ? "fn"
-		// 	: k == F_PTR ? "ptr"
-		// 				 : "int");
-	}
-	return !out.empty();
-}
-
 /*
 	Most derived vtables of the object behind an AEffect. When the AEffect
 	initializer stores its own object as AEffect::object, it is a constructor
@@ -188,14 +147,19 @@ static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 
 void scan() {
 
+	const ea_t entry = find_entry();
+	report::heading("VST2 entry", entry);
+	report::addr_row("entry", entry);
+
 	std::set<ea_t> candidates;
 	find_candidates(candidates);
 
 	std::vector<aeffect_hit_t> all_hits;
 
-	std::vector<aeffect_field_t> fields;
-	int size;
-	load_aeffect_layout(fields, size);
+	layout_t layout;
+	load_layout("AEffect", members, layout, inf_is_64bit() ? 192 : 144, false);
+	const std::vector<aeffect_field_t>& fields = layout.fields;
+	const int size = layout.size;
 
 	for (const ea_t c_ea : candidates) {
 		cfuncptr_t cf = decompile_at(c_ea);
@@ -205,9 +169,14 @@ void scan() {
 		}
 	}
 
+	if (all_hits.empty()) {
+		report::heading("VST2 AEffect");
+		report::row("AEffect", "(not found)");
+	}
+
 	int64 object_off = -1;
 	for (const aeffect_field_t& f : fields)
-		if (strcmp(f.name, "object") == 0) object_off = f.off;
+		if (f.name == "object") object_off = f.off;
 
 	// Some plugins share a single dispatcher between classes
 	std::map<ea_t, std::vector<dispatcher_info_t>> results;
