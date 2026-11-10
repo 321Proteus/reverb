@@ -298,8 +298,8 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 			else if (f.kind == F_STR && a.k == call_arg_t::OBJ)
 				col.copies.push_back(copy_of(at, a.ea, c.ea));
 			else if (f.kind == F_STR && a.k == call_arg_t::STR)
-				rv_log(
-					"    %s at %a is a cot_str with no address", f.name.c_str(), c.ea);
+				rv_log("    %s at %a is a cot_str with no address",
+					f.name.c_str(), c.ea);
 			// NUM 0 for a string is a NULL pointer: leave the field unwritten
 		}
 		return;

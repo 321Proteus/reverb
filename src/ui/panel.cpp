@@ -46,16 +46,15 @@ static size_t key_width(size_t i, bool children) {
 	size_t w = 0;
 	for (; i < es.size() && es[i].kind != report::HEADING; i++) {
 		if (children && es[i].kind != report::CHILD) break;
-		if (children || is_row(es[i].kind))
-			w = std::max(w, es[i].key.length());
+		if (children || is_row(es[i].kind)) w = std::max(w, es[i].key.length());
 	}
 	return w;
 }
 
-static qstring row_line(const char* indent, size_t w, const qstring& key,
-	const qstring& value) {
+static qstring row_line(
+	const char* indent, size_t w, const qstring& key, const qstring& value) {
 	const qstring v = printable(value);
-	const char* color = v.starts_with("\"")  ? SCOLOR_DSTR
+	const char* color = v.starts_with("\"")	 ? SCOLOR_DSTR
 						: v.starts_with("(") ? SCOLOR_AUTOCMT
 											 : SCOLOR_DEFAULT;
 	qstring l;
@@ -120,9 +119,8 @@ static int src_at(TWidget* cv) {
 static void rebuild(TWidget* cv) {
 	int x = 0, y = 0;
 	place_t* p = get_custom_viewer_place(cv, false, &x, &y);
-	simpleline_place_t at(p != nullptr
-							  ? static_cast<simpleline_place_t*>(p)->n
-							  : 0);
+	simpleline_place_t at(
+		p != nullptr ? static_cast<simpleline_place_t*>(p)->n : 0);
 
 	build();
 	simpleline_place_t first, last(int(g_lines.size()) - 1);
