@@ -5,6 +5,7 @@
 #include "db/segments.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/call.hpp"
+#include "ui/report.hpp"
 #include <array>
 #include <bytes.hpp>
 #include <cstring>
@@ -41,13 +42,6 @@ struct class_rec_t {
 	ea_t callee = BADADDR;
 	ea_t create = BADADDR;
 };
-
-bool str_field(const factory_struct_t& s, const char* f, qstring& out) {
-	auto it = s.fields.find(f);
-
-	return it != s.fields.end() && it->second.v.t == val_t::ADDR &&
-		   read_utf8(it->second.v.ea, out);
-}
 
 qstring cid_hex(const factory_struct_t& s) {
 	qstring out;
@@ -539,6 +533,32 @@ void type_object(const class_rec_t& r) {
 	}
 }
 
+void report_class(const class_rec_t& r, const char* missing) {
+
+	qstring title;
+	title.sprnt("VST3 class \"%s\"", r.name.empty() ? "?" : r.name.c_str());
+	report::heading(title, r.create);
+
+	report::row("category", r.category.empty() ? "(none)" : r.category);
+
+	qstring v;
+	for (const char* f :
+		{ "subCategories", "vendor", "version", "sdkVersion" }) {
+		if (str_field(*r.s, f, v) && !v.empty()) report::row(f, v);
+	}
+
+	report::row("cid", r.cid.empty() ? "(unknown)" : r.cid);
+
+	if (r.have_flags) {
+		v.sprnt("0x%llX", (unsigned long long)r.flags);
+		report::row("classFlags", v);
+	}
+
+	if (missing != nullptr) report::row("createInstance", missing);
+	else
+		report::addr_row("createInstance", r.create);
+}
+
 } // namespace
 
 void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
@@ -547,7 +567,7 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 	call_collector_t cc;
 	cc.apply_to(&cf->body, nullptr);
 
-	std::vector<class_rec_t> recs;
+	std::vector<class_rec_t> recs, unmatched;
 	for (const factory_struct_t& s : structs) {
 		if (!s.type || strcmp(s.type, "PClassInfo2") != 0) continue;
 
@@ -557,28 +577,21 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 		str_field(s, "category", r.category);
 		r.cid = cid_hex(s);
 
-		if (auto f = s.fields.find("classFlags");
-			f != s.fields.end() && f->second.v.t == val_t::NUM) {
-			r.have_flags = true;
-			r.flags = f->second.v.num;
-		}
-
-		if (auto ob = s.or_bits.find("classFlags"); ob != s.or_bits.end()) {
-			r.have_flags = true;
-			r.flags |= ob->second;
-		}
+		r.have_flags = num_field(s, "classFlags", r.flags);
 
 		if (s.root != GLOBAL_ROOT && s.base_off != 0) {
 			rv_log("class \"%s\" [%s]: local PClassInfo2 at var%d%+lld, "
 				   "skipped",
 				r.name.c_str(), r.category.c_str(), s.root,
 				(long long)s.base_off);
+			unmatched.push_back(std::move(r));
 			continue;
 		}
 
 		if (!find_register_call(cc.calls, s, r)) {
 			rv_log("class \"%s\" [%s]: no registerClass call found",
 				r.name.c_str(), r.category.c_str());
+			unmatched.push_back(std::move(r));
 			continue;
 		}
 
@@ -586,6 +599,12 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 			r.category.c_str(), r.create);
 		recs.push_back(std::move(r));
 	}
+
+	if (recs.empty() && unmatched.empty())
+		report::row("classes", "(no PClassInfo2 found)");
+
+	for (const class_rec_t& r : unmatched)
+		report_class(r, "(no registerClass call found)");
 
 	if (recs.empty()) return;
 
@@ -623,6 +642,9 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 		apply_class(r, qstring("vst3_createInstance_") + n);
 		type_object(r);
 	}
+
+	for (const class_rec_t& r : recs)
+		report_class(r, nullptr);
 
 	mark_cfunc_dirty(cf->entry_ea);
 }

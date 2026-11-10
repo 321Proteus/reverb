@@ -394,4 +394,27 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 	return out;
 }
 
+bool str_field(const factory_struct_t& s, const char* f, qstring& out) {
+	auto it = s.fields.find(f);
+
+	return it != s.fields.end() && it->second.v.t == val_t::ADDR &&
+		   read_utf8(it->second.v.ea, out);
+}
+
+bool num_field(const factory_struct_t& s, const char* f, uint64& out) {
+	bool have = false;
+	out = 0;
+
+	if (auto it = s.fields.find(f);
+		it != s.fields.end() && it->second.v.t == val_t::NUM) {
+		have = true;
+		out = it->second.v.num;
+	}
+	if (auto ob = s.or_bits.find(f); ob != s.or_bits.end()) {
+		have = true;
+		out |= ob->second;
+	}
+	return have;
+}
+
 } // namespace rv::vst3
