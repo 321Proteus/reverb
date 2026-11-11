@@ -38,6 +38,7 @@ constexpr const char* CLASS_INFO_MEMBERS[] = { "cid", "cardinality", "category",
 */
 struct factory_collector_t : public store_collector_t {
 	std::vector<store_t> copies;
+	std::set<ea_t> globals;
 
 	factory_collector_t(const cfunc_t* f) : store_collector_t(f) {}
 
@@ -120,6 +121,7 @@ struct factory_collector_t : public store_collector_t {
 
 	int idaapi visit_expr(cexpr_t* e) override {
 
+		if (e->op == cot_obj) globals.insert(e->obj_ea);
 		if (e->op == cot_call) add_str_copy(e);
 
 		if (e->op == cot_sub) {
@@ -272,18 +274,19 @@ bool looks_like_factory_info(ea_t ea, const layout_t& info) {
 		   get_dword(ea + flags->off) <= 0x1F; // kUnicode is the top flag
 }
 
-void lower_factory_info(
-	factory_collector_t& col, const call_t& c, const layout_t& info) {
-	for (const call_arg_t& a : c.args) {
-		if (a.k != call_arg_t::OBJ || !looks_like_factory_info(a.ea, info))
-			continue;
+// A complete PFactoryInfo in data, passed to the factory constructor or copied
+// by an inlined one
+void lower_factory_infos(factory_collector_t& col, const layout_t& info) {
+	for (const ea_t ea : col.globals) {
+		if (!looks_like_factory_info(ea, info)) continue;
+
 		for (const field_desc_t& f : info.fields) {
-			const loc_t at{ GLOBAL_ROOT, int64(a.ea + f.off) };
+			const loc_t at{ GLOBAL_ROOT, int64(ea + f.off) };
 			if (f.kind == F_STR)
-				col.copies.push_back(copy_of(at, a.ea + f.off, c.ea));
+				col.copies.push_back(copy_of(at, ea + f.off, ea));
 			else {
-				store_t s = num_store(at, f.sz, 0, c.ea);
-				if (read_const(a.ea + f.off, f.sz, s.val))
+				store_t s = num_store(at, f.sz, 0, ea);
+				if (read_const(ea + f.off, f.sz, s.val))
 					col.stores.push_back(std::move(s));
 			}
 		}
@@ -358,9 +361,10 @@ void lower_call_args(
 	uint32 uid[4] = {};
 	bool have_uid = false;
 
+	if (have_info) lower_factory_infos(col, info);
+
 	for (const call_t& c : calls) {
 		if (match_uid_builder(c.args, uid)) have_uid = true;
-		if (have_info) lower_factory_info(col, c, info);
 		if (have_cls)
 			lower_class_info(col, c, cls, have_uid ? &uid : nullptr, com);
 	}
