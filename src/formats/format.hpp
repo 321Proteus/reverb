@@ -1,5 +1,7 @@
 #pragma once
 #include "core/reverb.hpp"
+#include "patterns/taint.hpp"
+#include <cstddef>
 
 /**
  * @file format.hpp
@@ -16,6 +18,9 @@ typedef struct {
 	void (*scan)();	 /**< Finds the format's entry points and records what they
 						say */
 	void (*label)(); /**< Names and types what scan() found */
+	const taint::seed_spec_t*
+		seeds;		/**< Functions introducing audio signal input or output */
+	size_t n_seeds; /**< The total number of taint seeds */
 } FormatModule;
 
 /**
