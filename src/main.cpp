@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
+#include "patterns/taint.hpp"
 
 /**
  * @brief Find and load the TIL library containing the plugin format types
@@ -118,6 +119,7 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::taint::run(is);
 	rv::store_report(rv::report::entries());
 	rv::panel::show_later();
 }

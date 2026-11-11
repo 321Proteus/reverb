@@ -1,27 +1,28 @@
 #include "taint.hpp"
 #include "core/log.hpp"
-#include <algorithm>
 
 namespace rv::taint {
 
-static std::vector<seed_t> g_seeds;
+static constexpr int MAX_DEPTH = 8;
 
-void add_seed(const seed_t& s) {
-	if (s.func == BADADDR || s.spec == nullptr) return;
+qstring short_type_name(const tinfo_t& t) {
+	qstring n;
+	if (!t.get_final_type_name(&n)) t.get_type_name(&n);
 
-	const bool dup = std::any_of(g_seeds.begin(), g_seeds.end(),
-		[&](const seed_t& o) {
-			return o.func == s.func && o.spec->arg == s.spec->arg;
-		});
-	if (dup) return;
-
-	rv_log("Taint seed: %s -> %a arg %d", s.spec->reason, s.func,
-		s.spec->arg);
-	g_seeds.push_back(s);
+	for (size_t i = n.length(); i > 0; i--)
+		if (n[i - 1] == ':') return n.substr(i);
+	return n;
 }
 
-const std::vector<seed_t>& seeds() { return g_seeds; }
+tinfo_t innermost(tinfo_t t) {
+	for (int i = 0; i < MAX_DEPTH && (t.is_ptr() || t.is_array()); i++)
+		t = t.get_ptrarr_object();
+	return t;
+}
 
-void clear_seeds() { g_seeds.clear(); }
+void run(InterfaceSet is) {
+	const std::vector<seed_t> seeds = find_seeds(is);
+	rv_log("Taint: %u seed(s) found", unsigned(seeds.size()));
+}
 
 } // namespace rv::taint

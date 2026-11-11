@@ -1,9 +1,17 @@
 #pragma once
 
+#include "core/reverb.hpp"
 #include <pro.h>
+#include <typeinf.hpp>
 #include <vector>
 
 namespace rv::taint {
+
+// The type name without typedefs and namespaces
+qstring short_type_name(const tinfo_t& t);
+
+// Strip every pointer and array level
+tinfo_t innermost(tinfo_t t);
 
 /*
 	Where the audio signal buffer pointer enters the binary, declared per
@@ -26,10 +34,10 @@ struct seed_t {
 	const seed_spec_t* spec = nullptr; // into a FormatModule's static table
 };
 
-// Dedupes by (func, arg)
-void add_seed(const seed_t& s);
+// Functions whose applied prototype matches a spec of the detected formats
+std::vector<seed_t> find_seeds(InterfaceSet is);
 
-const std::vector<seed_t>& seeds();
-void clear_seeds();
+// Find the seeds (propagation follows in a later step)
+void run(InterfaceSet is);
 
 } // namespace rv::taint
