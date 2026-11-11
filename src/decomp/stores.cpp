@@ -471,12 +471,14 @@ void store_collector_t::add_sub_copy(cexpr_t* e) {
 	store_t c;
 	if (!addr_loc(e->y, c.loc)) return;
 
+	// The source can come first transformed: (p + "abc") - base, with p the
+	// destination pointer. UNKNOWN for a string built at runtime
 	cexpr_t* src = strip_casts(e->x);
-	if (src->op == cot_ref) src = strip_casts(src->x);
-	if (src->op == cot_obj) { // UNKNOWN for a string built at runtime
-		c.val.t = val_t::ADDR;
-		c.val.ea = src->obj_ea;
+	if (src->op == cot_add) {
+		cexpr_t* y = strip_casts(src->y);
+		src = y->op == cot_obj || y->op == cot_ref ? y : src->x;
 	}
+	c.val = copy_src(src);
 
 	c.ea = e->ea;
 	c.text = expr_str(e, cf);
@@ -556,6 +558,6 @@ void store_collector_t::inline_callee(cexpr_t* call) {
 		nc += move(c, copies);
 
 	if (ns + nc != 0)
-		rv_log("  inlined %a called at %a: %u stores, %u string copies",
-			callee, call->ea, ns, nc);
+		rv_log("  inlined %a called at %a: %u stores, %u string copies", callee,
+			call->ea, ns, nc);
 }
