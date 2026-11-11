@@ -4,4 +4,5 @@ target_sources(reverb PRIVATE
     id_returns.hpp
     taint.cpp
     taint.hpp
+    taint_seeds.cpp
 )

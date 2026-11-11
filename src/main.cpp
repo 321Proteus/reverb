@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
+#include "patterns/taint.hpp"
 
 static bool format_til(bool import) {
 
@@ -108,6 +109,7 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::taint::run(is);
 	rv::store_report(rv::report::entries());
 	rv::panel::show_later();
 }
