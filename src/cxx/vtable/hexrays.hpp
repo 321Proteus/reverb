@@ -65,6 +65,13 @@ inline ea_t slot_func(ea_t vt, int slot) {
 	return is_code_addr(t) ? resolve_thunk(t) : BADADDR;
 }
 
+/*
+	fn fills a single slot of vt. A stub that the linker merged for several
+	methods (an empty one, return 0) fills more, and implements none of them
+	in particular
+*/
+bool unique_slot(ea_t vt, ea_t fn);
+
 } // namespace rv::vtbl
 
 namespace rv {
@@ -173,6 +180,14 @@ struct obj_tracker_t {
 				   : BADADDR;
 	}
 };
+
+/*
+	The method a function that only forwards calls virtually on the object it
+	reaches through an argument, e.g. a VST2 callback:
+	(*(*effect->object + 344))(effect->object, ...). obj.src_off and
+	obj.vtable describe the object, src_var is filled
+*/
+ea_t virtual_tail_callee(ea_t fn, obj_tracker_t obj);
 
 } // namespace rv
 

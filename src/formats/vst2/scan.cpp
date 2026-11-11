@@ -145,6 +145,47 @@ static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 	return { vt };
 }
 
+/*
+	Callbacks that only call a method of AEffect::object get their method
+	named vst2_<field>_impl
+*/
+static void label_impls(const aeffect_hit_t& h, ea_t vtable, int64 object_off) {
+	obj_tracker_t obj;
+	obj.src_off = object_off;
+	obj.vtable = vtable;
+
+	for (const auto& [field, fv] : h.fields) {
+		if (field == "dispatcher" || fv.v.t != val_t::ADDR ||
+			!is_code_addr(fv.v.ea))
+			continue;
+
+		const ea_t impl = virtual_tail_callee(fv.v.ea, obj);
+		if (impl == BADADDR) continue;
+
+		if (!vtbl::unique_slot(vtable, impl)) {
+			rv_log("    %s -> %a: shared by several methods, left unnamed",
+				field.c_str(), impl);
+			continue;
+		}
+
+		qstring nm;
+		nm.sprnt("vst2_%s_impl", field.c_str());
+
+		if (!has_dummy_name(get_flags(impl))) {
+			get_ea_name(&nm, impl);
+			rv_log("    %s -> %a: implementation keeps its name '%s'",
+				field.c_str(), impl, nm.c_str());
+			continue;
+		}
+
+		if (set_name(impl, nm.c_str(), SN_NOWARN | SN_FORCE)) {
+			rv_log("    %s -> %a: implementation named %s", field.c_str(), impl,
+				nm.c_str());
+			mark_cfunc_dirty(fv.v.ea);
+		}
+	}
+}
+
 void scan() {
 
 	const ea_t entry = find_entry();
@@ -190,6 +231,11 @@ void scan() {
 		const ea_t disp = d->second.v.ea;
 
 		std::vector<ea_t> vtables = plugin_vtables(h);
+
+		// Several plugin classes would need a name per class
+		if (vtables.size() == 1 && object_off >= 0)
+			label_impls(h, vtables[0], object_off);
+
 		if (vtables.empty()) vtables.push_back(BADADDR); // direct only
 
 		for (const ea_t vt : vtables) {

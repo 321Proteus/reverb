@@ -5,6 +5,13 @@
 
 namespace rv::vtbl {
 
+bool unique_slot(ea_t vt, ea_t fn) {
+	int uses = 0;
+	for (size_t i = 0, n = extent(vt); i < n; i++)
+		if (slot_func(vt, int(i)) == fn && ++uses > 1) return false;
+	return uses == 1;
+}
+
 ea_t ref(cexpr_t* e) {
 	e = strip_casts(e);
 	int64 off = 0;
@@ -198,6 +205,16 @@ bool obj_tracker_t::vcall_slot(
 	slot = int(off / psz);
 	if (vptr_off) *vptr_off = k;
 	return true;
+}
+
+ea_t virtual_tail_callee(ea_t fn, obj_tracker_t obj) {
+	cfuncptr_t cf = decompile_at(fn);
+	cexpr_t* call = tail_call(cf);
+	if (call == nullptr || cf->argidx.empty()) return BADADDR;
+
+	obj.src_var = cf->argidx[0];
+	const ea_t t = obj.vcall_target(call->x);
+	return t == BADADDR ? BADADDR : resolve_thunk(t);
 }
 
 } // namespace rv
