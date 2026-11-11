@@ -130,6 +130,9 @@ struct store_collector_t : public ctree_visitor_t {
 	std::map<int, int> byte_src;   // c = *src++: c -> src
 	std::vector<store_t> stores;
 
+	// Add what direct callees store through their first argument
+	bool inline_calls = false;
+
 	/*
 		Strings copied into objects: strcpy calls, inlined strncpy and copy
 		loops. Size 0, until a layout tells how wide the field is. val is
@@ -186,14 +189,22 @@ struct store_collector_t : public ctree_visitor_t {
 	// *v++, the pointer local v
 	static bool post_inc_deref(cexpr_t* e, int& var);
 
-	// Destination of a copy: a global at GLOBAL_ROOT, or a folded address
-	bool copy_dst(cexpr_t* e, loc_t& out);
+	// An address as a location: a global at GLOBAL_ROOT, or a folded one
+	bool addr_loc(cexpr_t* e, loc_t& out);
 
 	// Read source of a copy: a global, a literal or a local holding one
 	val_t copy_src(cexpr_t* e);
 
 	// strcpy(dst, src), memcpy(dst, src, n) etc
 	void add_call_copy(cexpr_t* call);
+
+	/*
+		A constructor called rather than inlined, e.g. one the compiler
+		specialized: PClassInfo2(&info, cid, ..., "Audio Module Class", ...).
+		Its stores and copies through the first parameter land at the first
+		argument, with the other parameters bound to the call's values
+	*/
+	void inline_callee(cexpr_t* call);
 
 	// Inlined strncpy indexing the source from the destination
 	void add_sub_copy(cexpr_t* e);

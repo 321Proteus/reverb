@@ -352,6 +352,7 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 	if (cf == nullptr) return out;
 
 	factory_collector_t col(cf);
+	col.inline_calls = true;
 	col.apply_to(&cf->body, nullptr);
 
 	call_collector_t cc;

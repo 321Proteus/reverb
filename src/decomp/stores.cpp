@@ -1,5 +1,6 @@
 #include "decomp/stores.hpp"
 #include "decomp/sse.hpp"
+#include "decomp/analysis.hpp"
 #include <pro.h>
 
 int64 scaled_off(const cexpr_t* e, int64 k) {
@@ -329,6 +330,7 @@ int idaapi store_collector_t::visit_expr(cexpr_t* e) {
 	if (e->op == cot_call) {
 		collect_sse_store(e);
 		add_call_copy(e);
+		if (inline_calls) inline_callee(e);
 		return 0;
 	}
 
@@ -414,7 +416,7 @@ bool store_collector_t::post_inc_deref(cexpr_t* e, int& var) {
 	return true;
 }
 
-bool store_collector_t::copy_dst(cexpr_t* e, loc_t& out) {
+bool store_collector_t::addr_loc(cexpr_t* e, loc_t& out) {
 	cexpr_t* d = strip_casts(e);
 	if (d->op == cot_ref) d = strip_casts(d->x);
 
@@ -455,7 +457,7 @@ void store_collector_t::add_call_copy(cexpr_t* call) {
 	if (!copy) return;
 
 	store_t c;
-	if (!copy_dst(&call->a->at(0), c.loc)) return;
+	if (!addr_loc(&call->a->at(0), c.loc)) return;
 
 	c.val = copy_src(&call->a->at(1));
 	if (c.val.t == val_t::UNKNOWN) return;
@@ -467,7 +469,7 @@ void store_collector_t::add_call_copy(cexpr_t* call) {
 
 void store_collector_t::add_sub_copy(cexpr_t* e) {
 	store_t c;
-	if (!copy_dst(e->y, c.loc)) return;
+	if (!addr_loc(e->y, c.loc)) return;
 
 	cexpr_t* src = strip_casts(e->x);
 	if (src->op == cot_ref) src = strip_casts(src->x);
@@ -505,4 +507,55 @@ bool store_collector_t::add_loop_copy(cexpr_t* asg) {
 	c.text = expr_str(asg, cf);
 	copies.push_back(std::move(c));
 	return true;
+}
+
+void store_collector_t::inline_callee(cexpr_t* call) {
+	if (call->a == nullptr || call->a->empty()) return;
+
+	cexpr_t* fn = strip_casts(call->x);
+	if (fn->op != cot_obj || !is_code_addr(fn->obj_ea)) return;
+
+	loc_t base;
+	if (!addr_loc(&call->a->at(0), base)) return;
+
+	const ea_t callee = rv::resolve_thunk(fn->obj_ea);
+	if (in_extern_seg(callee)) return;
+
+	cfuncptr_t ccf = rv::decompile_at(callee);
+	if (ccf == nullptr || ccf->argidx.empty()) return;
+
+	store_collector_t sub(&*ccf);
+	const size_t n = std::min(call->a->size(), ccf->argidx.size());
+	for (size_t i = 1; i < n; i++) {
+		const val_t v = value_of(&call->a->at(i));
+		if (v.t == val_t::NUM || v.t == val_t::ADDR || v.t == val_t::STR)
+			sub.var_vals[ccf->argidx[i]] = v;
+	}
+	sub.apply_to(&ccf->body, nullptr);
+
+	// The callee's this, moved to base; other callee locals mean nothing here
+	const int self = ccf->argidx[0];
+	auto move = [&](store_t s, std::vector<store_t>& to) {
+		if (s.loc.var != self) return false;
+		s.loc = loc_t{ base.var, base.off + s.loc.off };
+
+		if (s.val.t == val_t::LOCAL) {
+			if (s.val.loc.var == self)
+				s.val.loc = loc_t{ base.var, base.off + s.val.loc.off };
+			else
+				s.val = val_t{};
+		}
+		to.push_back(std::move(s));
+		return true;
+	};
+
+	unsigned ns = 0, nc = 0;
+	for (const store_t& s : sub.stores)
+		ns += move(s, stores);
+	for (const store_t& c : sub.copies)
+		nc += move(c, copies);
+
+	if (ns + nc != 0)
+		rv_log("  inlined %a called at %a: %u stores, %u string copies",
+			callee, call->ea, ns, nc);
 }
