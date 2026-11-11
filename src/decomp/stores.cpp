@@ -1,5 +1,6 @@
 #include "decomp/stores.hpp"
 #include "decomp/sse.hpp"
+#include <pro.h>
 
 int64 scaled_off(const cexpr_t* e, int64 k) {
 	tinfo_t t = e->type;
@@ -255,4 +256,253 @@ std::vector<store_t> frame_view(
 	for (store_t s : stores)
 		if (frame_loc(cf, s.loc)) out.push_back(std::move(s));
 	return out;
+}
+
+val_t store_collector_t::value_of(cexpr_t* e) {
+	e = strip_casts(e);
+	val_t v;
+	if (!e) return v;
+
+	if (e->op == cot_var) {
+		auto it = var_vals.find(e->v.idx);
+		if (it != var_vals.end()) return it->second;
+	}
+
+	switch (e->op) {
+
+	case cot_str:
+		if (e->string != nullptr) {
+			v.t = val_t::STR;
+			v.str = e->string;
+		}
+		return v;
+
+	case cot_num:
+		v.t = val_t::NUM;
+		v.num = e->numval();
+		return v;
+
+	case cot_obj: {
+		const ea_t obj = e->obj_ea;
+		// Function, code, arr decay or an address taken with lea
+		if (e->type.is_func() || is_code_addr(obj) || obj_is_array(e) ||
+			addr_taken(obj, cf)) {
+			v.t = val_t::ADDR;
+			v.ea = e->obj_ea;
+		}
+
+		// stored pytr load
+		else if (ea_t t; load_ptr_const(obj, t)) {
+			v.t = val_t::ADDR;
+			v.ea = t;
+		}
+
+		// scalar handled by const_load
+		return v;
+	}
+
+	case cot_ref: {
+		// explicit address like &unk_X / &qword_X
+		cexpr_t* x = strip_casts(e->x);
+		if (x->op == cot_obj) {
+			v.t = val_t::ADDR;
+			v.ea = x->obj_ea;
+		}
+		return v;
+	}
+
+	default: {
+		// A pointer into a tracked object. Pointer-sized only: a plain
+		// int local (numPrograms = v30) also folds as a bare var.
+		loc_t l;
+		if ((e->type.is_ptr() || e->type.get_size() == size_t(ptr_size())) &&
+			fold_addr(e, &alias, l)) {
+			v.t = val_t::LOCAL;
+			v.loc = l;
+		}
+		return v;
+	}
+	}
+}
+
+int idaapi store_collector_t::visit_expr(cexpr_t* e) {
+	if (e->op == cot_call) {
+		collect_sse_store(e);
+		add_call_copy(e);
+		return 0;
+	}
+
+	if (e->op == cot_sub) {
+		add_sub_copy(e);
+		return 0;
+	}
+
+	if (e->op != cot_asg && e->op != cot_asgbor) return 0;
+
+	// Alias tracking vX = (addr expr)
+	if (e->op == cot_asg) {
+		cexpr_t* lhs = strip_casts(e->x);
+		if (lhs->op == cot_var) {
+			const int var = lhs->v.idx;
+			loc_t l;
+			if (fold_addr(e->y, &alias, l) && l.var != var)
+				alias[var] = l; // e.g. v3 = a1 + 48
+			else
+				alias.erase(var); // reassigned to something else
+
+			// val assignment, later copied from
+			const val_t held = value_of(e->y);
+			if (held.t == val_t::ADDR || held.t == val_t::STR)
+				var_vals[var] = held;
+			else
+				var_vals.erase(var);
+
+			// c = *src++
+			if (int src; post_inc_deref(e->y, src)) byte_src[var] = src;
+			else
+				byte_src.erase(var);
+
+			// e.g. v14 = _mm_loadl_epi64(&off_X)
+			val_t low;
+			if (lhs->type.get_size() == 16 &&
+				(low = low_qword(e->y)).t != val_t::UNKNOWN)
+				sse_low[var] = low;
+			else
+				sse_low.erase(var);
+
+			// v29 = 16 may be a member of a split stack struct
+			const size_t sz = lhs->type.get_size();
+			if (sz != BADSIZE && sz > 0 && sz <= 8 &&
+				is_frame_object(cf, var)) {
+
+				store_t s;
+				s.loc = loc_t{ var, 0 };
+				s.size = int(sz);
+				s.ea = e->ea;
+				s.text = expr_str(e, cf);
+
+				add_store(std::move(s), e->y);
+			}
+
+			return 0;
+		}
+	}
+
+	if (e->op == cot_asg && add_loop_copy(e)) return 0;
+
+	store_t s;
+	if (!fold_lvalue(e->x, &alias, s.loc, s.size)) return 0;
+
+	s.is_or = (e->op == cot_asgbor);
+	s.ea = e->ea;
+	s.text = expr_str(e, cf);
+	add_store(std::move(s), e->y);
+	return 0;
+}
+
+bool store_collector_t::post_inc_deref(cexpr_t* e, int& var) {
+	e = strip_casts(e);
+	if (e == nullptr || e->op != cot_ptr) return false;
+
+	cexpr_t* inc = strip_casts(e->x);
+	if (inc->op != cot_postinc) return false;
+
+	cexpr_t* v = strip_casts(inc->x);
+	if (v->op != cot_var) return false;
+
+	var = v->v.idx;
+	return true;
+}
+
+bool store_collector_t::copy_dst(cexpr_t* e, loc_t& out) {
+	cexpr_t* d = strip_casts(e);
+	if (d->op == cot_ref) d = strip_casts(d->x);
+
+	if (d->op == cot_obj) {
+		out = loc_t{ GLOBAL_ROOT, int64(d->obj_ea) };
+		return true;
+	}
+	return fold_addr(e, &alias, out) || fold_addr(d, &alias, out);
+}
+
+val_t store_collector_t::copy_src(cexpr_t* e) {
+	cexpr_t* s = strip_casts(e);
+	if (s->op == cot_ref) s = strip_casts(s->x);
+
+	val_t v;
+	if (s->op == cot_obj) {
+		v.t = val_t::ADDR;
+		v.ea = s->obj_ea;
+		return v;
+	}
+
+	v = value_of(s);
+	return v.t == val_t::ADDR || v.t == val_t::STR ? v : val_t{};
+}
+
+void store_collector_t::add_call_copy(cexpr_t* call) {
+	cexpr_t* fn = strip_casts(call->x);
+	if (fn->op != cot_helper || call->a == nullptr || call->a->size() < 2)
+		return;
+
+	bool copy = false;
+	std::vector<qstring> funcs = { "strcpy", "strncpy", "memcpy", "qmemcpy",
+		"strcpy_s" };
+	for (const qstring& func : funcs) {
+		copy = copy || strcmp(fn->helper, func.c_str()) == 0;
+	}
+
+	if (!copy) return;
+
+	store_t c;
+	if (!copy_dst(&call->a->at(0), c.loc)) return;
+
+	c.val = copy_src(&call->a->at(1));
+	if (c.val.t == val_t::UNKNOWN) return;
+
+	c.ea = call->ea;
+	c.text = expr_str(call, cf);
+	copies.push_back(std::move(c));
+}
+
+void store_collector_t::add_sub_copy(cexpr_t* e) {
+	store_t c;
+	if (!copy_dst(e->y, c.loc)) return;
+
+	cexpr_t* src = strip_casts(e->x);
+	if (src->op == cot_ref) src = strip_casts(src->x);
+	if (src->op == cot_obj) { // UNKNOWN for a string built at runtime
+		c.val.t = val_t::ADDR;
+		c.val.ea = src->obj_ea;
+	}
+
+	c.ea = e->ea;
+	c.text = expr_str(e, cf);
+	copies.push_back(std::move(c));
+}
+
+bool store_collector_t::add_loop_copy(cexpr_t* asg) {
+	int dst, src;
+	if (!post_inc_deref(asg->x, dst)) return false;
+
+	cexpr_t* y = strip_casts(asg->y);
+	if (y->op == cot_var) {
+		auto it = byte_src.find(y->v.idx);
+		if (it == byte_src.end()) return false;
+		src = it->second;
+	} else if (!post_inc_deref(y, src)) {
+		return false;
+	}
+
+	store_t c;
+	auto a = alias.find(dst);
+	c.loc = a != alias.end() ? a->second : loc_t{ dst, 0 };
+
+	auto it = var_vals.find(src);
+	if (it != var_vals.end()) c.val = it->second;
+
+	c.ea = asg->ea;
+	c.text = expr_str(asg, cf);
+	copies.push_back(std::move(c));
+	return true;
 }

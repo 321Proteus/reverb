@@ -32,13 +32,9 @@ constexpr const char* FACTORY_INFO_MEMBERS[] = { "vendor", "url", "email",
 constexpr const char* CLASS_INFO_MEMBERS[] = { "cid", "cardinality", "category",
 	"name", "classFlags", "subCategories", "vendor", "version", "sdkVersion" };
 
-/*
-	Adds stores to globals, and the inlined strncpy8 calls.
-	A copy is kept with size 0 until a layout tells how wide its field is
-*/
+// Adds stores to globals
 struct factory_collector_t : public store_collector_t {
-	std::vector<store_t> copies;
-	std::set<ea_t> globals;
+	std::set<ea_t> globals; // every global the function refers to
 
 	factory_collector_t(const cfunc_t* f) : store_collector_t(f) {}
 
@@ -60,74 +56,9 @@ struct factory_collector_t : public store_collector_t {
 		stores.push_back(std::move(s));
 	}
 
-	void add_copy(cexpr_t* e) {
-		store_t c;
-
-		cexpr_t* dst = strip_casts(e->y);
-		if (dst->op == cot_ref) dst = strip_casts(dst->x);
-
-		if (dst->op == cot_obj)
-			c.loc = loc_t{ GLOBAL_ROOT, int64(dst->obj_ea) };
-		else if (!fold_addr(e->y, &alias, c.loc))
-			return;
-
-		// Stays UNKNOWN for a string built at runtime
-		cexpr_t* src = strip_casts(e->x);
-		if (src->op == cot_ref) src = strip_casts(src->x);
-
-		if (src->op == cot_obj) {
-			c.val.t = val_t::ADDR;
-			c.val.ea = src->obj_ea;
-		}
-
-		c.ea = e->ea;
-		c.text = expr_str(e, cf);
-		copies.push_back(std::move(c));
-	}
-
-	// strcpy(v6, "https://...") / memcpy(v6, "...", n): a string copied
-	// into a local char array
-	void add_str_copy(cexpr_t* e) {
-		cexpr_t* fn = strip_casts(e->x);
-		if (fn->op != cot_helper || !e->a || e->a->size() < 2) return;
-
-		const qstring n = fn->helper;
-		if (n != "strcpy" && n != "strncpy" && n != "memcpy" &&
-			n != "qmemcpy" && n != "strcpy_s")
-			return;
-
-		store_t c;
-		cexpr_t* dst = strip_casts(&e->a->at(0));
-		if (dst->op == cot_ref) dst = strip_casts(dst->x);
-		if (!fold_addr(dst, &alias, c.loc)) return;
-
-		cexpr_t* src = strip_casts(&e->a->at(1));
-		if (src->op == cot_ref) src = strip_casts(src->x);
-
-		if (src->op == cot_str && src->string != nullptr) {
-			c.val.t = val_t::STR; // literals have no address
-			c.val.str = src->string;
-		} else if (src->op == cot_obj) {
-			c.val.t = val_t::ADDR;
-			c.val.ea = src->obj_ea;
-		} else {
-			return;
-		}
-
-		c.ea = e->ea;
-		c.text = expr_str(e, cf);
-		copies.push_back(std::move(c));
-	}
-
 	int idaapi visit_expr(cexpr_t* e) override {
 
 		if (e->op == cot_obj) globals.insert(e->obj_ea);
-		if (e->op == cot_call) add_str_copy(e);
-
-		if (e->op == cot_sub) {
-			add_copy(e);
-			return 0;
-		}
 
 		if (e->op == cot_asg) {
 			cexpr_t* lhs = strip_casts(e->x);

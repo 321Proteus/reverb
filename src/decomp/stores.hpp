@@ -101,6 +101,10 @@ bool const_load(cexpr_t* e, ea_t& src);
 // Load a complete multi-byte stored constant
 bool read_const(ea_t src, int size, val_t& v);
 
+// Root of a global object. Its stores keep the absolute address in
+// loc_t::off, so base_off + field offset still matches them
+inline constexpr int GLOBAL_ROOT = -1;
+
 /*
 	Hex-Rays splits a struct built on the stack into one lvar per member.
 	In frame terms they share FRAME_ROOT, at their stack offsets, so the
@@ -121,66 +125,21 @@ std::vector<store_t> frame_view(
 struct store_collector_t : public ctree_visitor_t {
 	const cfunc_t* cf;
 	alias_map_t alias;
-	std::map<int, val_t> sse_low; // SSE local -> value of its low 8 bytes
+	std::map<int, val_t> sse_low;  // SSE local -> value of its low 8 bytes
+	std::map<int, val_t> var_vals; // local -> address or literal it holds
+	std::map<int, int> byte_src;   // c = *src++: c -> src
 	std::vector<store_t> stores;
+
+	/*
+		Strings copied into objects: strcpy calls, inlined strncpy and copy
+		loops. Size 0, until a layout tells how wide the field is. val is
+		the source, UNKNOWN for a string built at runtime
+	*/
+	std::vector<store_t> copies;
 
 	store_collector_t(const cfunc_t* f) : ctree_visitor_t(CV_FAST), cf(f) {}
 
-	val_t value_of(cexpr_t* e) {
-		e = strip_casts(e);
-		val_t v;
-		if (!e) return v;
-
-		switch (e->op) {
-
-		case cot_num:
-			v.t = val_t::NUM;
-			v.num = e->numval();
-			return v;
-
-		case cot_obj: {
-			const ea_t obj = e->obj_ea;
-			// Function, code, arr decay or an address taken with lea
-			if (e->type.is_func() || is_code_addr(obj) || obj_is_array(e) ||
-				addr_taken(obj, cf)) {
-				v.t = val_t::ADDR;
-				v.ea = e->obj_ea;
-			}
-
-			// stored pytr load
-			else if (ea_t t; load_ptr_const(obj, t)) {
-				v.t = val_t::ADDR;
-				v.ea = t;
-			}
-
-			// scalar handled by const_load
-			return v;
-		}
-
-		case cot_ref: {
-			// explicit address like &unk_X / &qword_X
-			cexpr_t* x = strip_casts(e->x);
-			if (x->op == cot_obj) {
-				v.t = val_t::ADDR;
-				v.ea = x->obj_ea;
-			}
-			return v;
-		}
-
-		default: {
-			// A pointer into a tracked object. Pointer-sized only: a plain
-			// int local (numPrograms = v30) also folds as a bare var.
-			loc_t l;
-			if ((e->type.is_ptr() ||
-					e->type.get_size() == size_t(ptr_size())) &&
-				fold_addr(e, &alias, l)) {
-				v.t = val_t::LOCAL;
-				v.loc = l;
-			}
-			return v;
-		}
-		}
-	}
+	val_t value_of(cexpr_t* e);
 
 	/*
 		The low 8 bytes of an SSE value holding a single scalar:
@@ -209,59 +168,7 @@ struct store_collector_t : public ctree_visitor_t {
 		return value_of(e);
 	}
 
-	int idaapi visit_expr(cexpr_t* e) override {
-		if (e->op == cot_call) {
-			collect_sse_store(e);
-			return 0;
-		}
-		if (e->op != cot_asg && e->op != cot_asgbor) return 0;
-
-		// Alias tracking vX = (addr expr)
-		if (e->op == cot_asg) {
-			cexpr_t* lhs = strip_casts(e->x);
-			if (lhs->op == cot_var) {
-				const int var = lhs->v.idx;
-				loc_t l;
-				if (fold_addr(e->y, &alias, l) && l.var != var)
-					alias[var] = l; // e.g. v3 = a1 + 48
-				else
-					alias.erase(var); // reassigned to something else
-
-				// e.g. v14 = _mm_loadl_epi64(&off_X)
-				val_t low;
-				if (lhs->type.get_size() == 16 &&
-					(low = low_qword(e->y)).t != val_t::UNKNOWN)
-					sse_low[var] = low;
-				else
-					sse_low.erase(var);
-
-				// v29 = 16 may be a member of a split stack struct
-				const size_t sz = lhs->type.get_size();
-				if (sz != BADSIZE && sz > 0 && sz <= 8 &&
-					is_frame_object(cf, var)) {
-
-					store_t s;
-					s.loc = loc_t{ var, 0 };
-					s.size = int(sz);
-					s.ea = e->ea;
-					s.text = expr_str(e, cf);
-
-					add_store(std::move(s), e->y);
-				}
-
-				return 0;
-			}
-		}
-
-		store_t s;
-		if (!fold_lvalue(e->x, &alias, s.loc, s.size)) return 0;
-
-		s.is_or = (e->op == cot_asgbor);
-		s.ea = e->ea;
-		s.text = expr_str(e, cf);
-		add_store(std::move(s), e->y);
-		return 0;
-	}
+	int idaapi visit_expr(cexpr_t* e) override;
 
 	// _mm_storeu_si128((__m128i *)(a1 + 16), _mm_load_si128(&xmmword_X))
 	void collect_sse_store(cexpr_t* e) {
@@ -275,6 +182,24 @@ struct store_collector_t : public ctree_visitor_t {
 		s.text = expr_str(e, cf);
 		add_store(std::move(s), value);
 	}
+
+	// *v++, the pointer local v
+	static bool post_inc_deref(cexpr_t* e, int& var);
+
+	// Destination of a copy: a global at GLOBAL_ROOT, or a folded address
+	bool copy_dst(cexpr_t* e, loc_t& out);
+
+	// Read source of a copy: a global, a literal or a local holding one
+	val_t copy_src(cexpr_t* e);
+
+	// strcpy(dst, src), memcpy(dst, src, n) etc
+	void add_call_copy(cexpr_t* call);
+
+	// Inlined strncpy indexing the source from the destination
+	void add_sub_copy(cexpr_t* e);
+
+	// a *dst++ = *src++ loop
+	bool add_loop_copy(cexpr_t* asg);
 
 	/*
 		Records s with the value of y. Shared by assignments and store
