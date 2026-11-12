@@ -4,6 +4,8 @@ function(rv_embed_header SRC_FILE VAR_NAME OUT_FILE)
     string(TOUPPER "${VAR_NAME}" CASED_NAME)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SRC_FILE}")
     file(READ "${SRC_FILE}" CONTENTS)
+    # #include lines only serve the IDE: IDA's parser gets the file alone
+    string(REGEX REPLACE "(^|\n)[ \t]*#[ \t]*include[^\n]*" "\\1" CONTENTS "${CONTENTS}")
     file(WRITE "${OUT_FILE}" "static const char* ${CASED_NAME} = R\"RVSRC(\n${CONTENTS}\n)RVSRC\";\n")
     message(STATUS "Generated ${VAR_NAME}")
 endfunction()
