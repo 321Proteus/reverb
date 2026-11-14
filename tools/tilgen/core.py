@@ -11,6 +11,8 @@ from IDA first nor clang.cindex.
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,28 +33,50 @@ class Abi:
     bits: int = 64               # the database must be this wide (see Session)
     windows: bool = True         # Windows SDK headers (xwin) apply
     cxx: str = "c++"             # the -x language of C++ sources
+    dummy_cc: tuple = ()         # compilers that can make a database for it
 
 
 # Adding an ABI is a row. Only msvc64 is exercised for now.
 ABIS = {
     "msvc64": Abi("x86_64-pc-windows-msvc", "MSVC x64",
                   (("__RV_API", ""), ("__RV_THISCALL", ""),
-                   ("__RV_ITANIUM_ONLY", "//"), ("__RV_MAC_ONLY", "//"))),
+                   ("__RV_ITANIUM_ONLY", "//"), ("__RV_MAC_ONLY", "//")),
+                  dummy_cc=("x86_64-w64-mingw32-gcc",)),
     "msvc32": Abi("i686-pc-windows-msvc", "MSVC x86",
                   (("__RV_API", "__stdcall"), ("__RV_THISCALL", "__thiscall"),
                    ("__RV_ITANIUM_ONLY", "//"), ("__RV_MAC_ONLY", "//")),
-                  bits=32),
+                  bits=32, dummy_cc=("i686-w64-mingw32-gcc",)),
     # Need system headers (--sys-include) and a database of that platform;
     # the JUCE wrappers pull Cocoa headers on Apple
     "itanium64": Abi("x86_64-linux-gnu", "Itanium x64 (Linux)",
                      (("__RV_API", ""), ("__RV_THISCALL", ""),
                       ("__RV_ITANIUM_ONLY", ""), ("__RV_MAC_ONLY", "//")),
-                     windows=False),
+                     windows=False, dummy_cc=("cc", "gcc", "clang")),
     "apple64": Abi("arm64-apple-darwin", "Apple arm64",
                    (("__RV_API", ""), ("__RV_THISCALL", ""),
                     ("__RV_ITANIUM_ONLY", ""), ("__RV_MAC_ONLY", "")),
                    windows=False, cxx="objective-c++"),
 }
+
+
+def ensure_db(abi, root=OUT_ROOT.parent):
+    """A database the parser can run in: a minimal executable for `abi`,
+    built once into build/dummy/. Windows ABIs use mingw-w64 (its 64-bit PE is
+    detected by IDA as MSVC; its 32-bit one as GNU, which breaks msvc32: see
+    use_compiler)."""
+    d = Path(root) / "dummy"
+    exe = d / (f"dummy_{abi}" + (".exe" if ABIS[abi].windows else ""))
+    if exe.exists():
+        return exe
+    cc = next((c for c in ABIS[abi].dummy_cc if shutil.which(c)), None)
+    if cc is None:
+        raise SystemExit(f"no compiler found to build a dummy for {abi} "
+                         f"(tried {ABIS[abi].dummy_cc or 'none'}): pass --db")
+    d.mkdir(parents=True, exist_ok=True)
+    src = d / "dummy.c"
+    src.write_text("int main(void) { return 0; }\n")
+    subprocess.run([cc, "-o", str(exe), str(src)], check=True)
+    return exe
 
 
 def substitute(text, abi):
@@ -95,14 +119,37 @@ UNDEF_IDA_KEYWORDS = (
     "__usercall", "__userpurge")
 
 
+def host_includes():
+    """The include dirs of the host C++ compiler, as it reports them: where
+    Itanium (Linux) headers are on this machine. Empty if there is none."""
+    cxx = next((c for c in ("c++", "g++", "clang++") if shutil.which(c)), None)
+    if cxx is None:
+        return []
+    r = subprocess.run([cxx, "-E", "-x", "c++", "-v", "-"], input="",
+                       capture_output=True, text=True)
+    dirs, on = [], False
+    for line in r.stderr.splitlines():
+        if line.startswith("#include <...>"):
+            on = True
+        elif line.startswith("End of search list"):
+            break
+        elif on and line.startswith(" "):
+            dirs.append(os.path.normpath(line.strip()))
+    return dirs
+
+
 def system_includes(abi, xwin, extra=()):
-    """The platform headers for `abi`: the xwin splat for Windows ABIs,
-    otherwise only what --sys-include gives."""
+    """The platform headers for `abi`: the xwin splat for Windows ABIs; for
+    itanium64 what --sys-include gives, else the host compiler's; for the
+    rest only what --sys-include gives."""
     x = str(xwin)
-    win = ([f"{x}/crt/include", f"{x}/sdk/include/ucrt",
-            f"{x}/sdk/include/um", f"{x}/sdk/include/shared"]
-           if ABIS[abi].windows else [])
-    return win + list(extra)
+    if ABIS[abi].windows:
+        win = [f"{x}/crt/include", f"{x}/sdk/include/ucrt",
+               f"{x}/sdk/include/um", f"{x}/sdk/include/shared"]
+        return win + list(extra)
+    if not extra and abi == "itanium64":
+        return host_includes()
+    return list(extra)
 
 
 def parser_args(abi, lang, includes, defines=()):
@@ -111,7 +158,7 @@ def parser_args(abi, lang, includes, defines=()):
     (quirk 1). -frtti is overridden by IDA anyway (quirk 3)."""
     kind = "c" if lang.startswith("c") and not lang.startswith("c++") \
         else ABIS[abi].cxx
-    args = [f"-x {kind} -std={lang}", f"-target {ABIS[abi].triple}"]
+    args = [f"-x {kind} -std={lang}", f"-target {ABIS[abi].triple}", "-Xclang -skip-function-bodies"]
     if kind != "c":
         args.append("-frtti")
     args.append("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")

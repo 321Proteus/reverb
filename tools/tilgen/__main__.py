@@ -1,10 +1,16 @@
-"""python -m tilgen --db PE [--source formats|juce|all] [--refs A,B]
-[--abi msvc64] [--force]. Builds run sequentially in this one process."""
+"""python -m tilgen [--db PE] [--source formats|juce|all] [--refs A,B]
+[--abi msvc64] [--force] [-j N]. Each til is built by its own child process,
+on its own copy of the database (idalib locks the file); -j runs N at once.
+Without --db a dummy executable is built into build/dummy/."""
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import core
@@ -17,9 +23,20 @@ def main():
 
     ap.add_argument(
         "--db",
-        required=True,
-        help="Any small binary of the target ABI (x64 PE for msvc64)"
+        help="Any small binary of the target ABI (default: a dummy built "
+        "into build/dummy/ with a compiler found for the ABI)"
     )
+
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        help="tils built at the same time"
+    )
+
+    ap.add_argument("--entry-out", help=argparse.SUPPRESS)
+    ap.add_argument("--log", help=argparse.SUPPRESS)
 
     ap.add_argument(
         "--source",
@@ -99,10 +116,12 @@ def main():
                           a.only.split(",") if a.only else ()))
 
     log = lambda s: print(s, flush=True)
+    if not a.db:
+        a.db = str(core.ensure_db(a.abi))
     if not a.inprocess:
         sys.exit(run_children(a, sources, out, log))
 
-    sess = core.Session(a.db, out / "tilgen.log")
+    sess = core.Session(a.db, a.log or out / "tilgen.log")
     sess.require_bits(a.abi)
     sess.use_compiler(a.abi)
 
@@ -131,8 +150,11 @@ def main():
                     log(f"  PROBLEM {p}")
 
                 bad += e["status"] != "ok"
-                entries = core.upsert(entries, e)
-                core.save_manifest(entries, out)
+                if a.entry_out:     # the parent merges them into the manifest
+                    Path(a.entry_out).write_text(json.dumps(e))
+                else:
+                    entries = core.upsert(entries, e)
+                    core.save_manifest(entries, out)
 
     finally:
         sess.close()
@@ -156,24 +178,37 @@ def pick_versions(a, src):
 
 
 def run_children(a, sources, out, log):
-    """One `--inprocess` child per til. IDA's clang crashes on some JUCE tags
-    (see the report); the parent notes the crash in the manifest and goes on."""
-    entries = core.load_manifest(out)
-    bad = 0
+    """One `--inprocess` child per til, on its own copy of the database, up to
+    -j at once. IDA's clang crashes on some JUCE tags; the parent notes the
+    crash in the manifest and goes on. Only the parent writes the manifest."""
+    lock = threading.Lock()
+    state = {"entries": core.load_manifest(out), "bad": 0}
+    jobs = []
 
     for src in sources:
         for ver in pick_versions(a, src):
-
             lab = src.label(ver)
             path = src.out_path(out, lab, a.abi)
             if path.exists() and not a.force:
                 log(f"[{src.name} {lab}] exists, skipped")
                 continue
+            jobs.append((src, ver, lab))
 
-            cmd = [sys.executable, "-m", "tilgen", "--db", a.db, "--source",
-                   src.name, "--refs", ver, "--abi", a.abi, "--sdks", a.sdks,
-                   "--xwin", a.xwin, "--out", str(out), "--inprocess"]
+    def run(job):
+        src, ver, lab = job
+        tmp = Path(tempfile.mkdtemp(prefix="tilgen_db_"))
+        try:
+            db = tmp / Path(a.db).name
+            shutil.copy2(a.db, db)
+            entry = tmp / "entry.json"
+            logf = out / "logs" / f"{src.name}-{lab}-{a.abi}.log"
+            logf.parent.mkdir(parents=True, exist_ok=True)
 
+            cmd = [sys.executable, "-m", "tilgen", "--db", str(db),
+                   "--source", src.name, "--refs", ver, "--abi", a.abi,
+                   "--sdks", a.sdks, "--xwin", a.xwin, "--out", str(out),
+                   "--inprocess", "--entry-out", str(entry),
+                   "--log", str(logf)]
             if a.vst3:
                 cmd += ["--vst3", a.vst3]
             if a.only:
@@ -181,31 +216,33 @@ def run_children(a, sources, out, log):
             for d in a.sys_include:
                 cmd += ["--sys-include", d]
 
-            rc = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1]).returncode
-
-            if rc not in (0, 1):    # 1: ran, anchors failed (already logged)
+            p = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1],
+                               capture_output=True, text=True)
+            rc = p.returncode
+            lines = p.stdout.splitlines()
+            if rc not in (0, 1):    # 1: ran, anchors failed (in the output)
                 what = "crash" if rc < 0 else "error"
+                lines.append(f"  {what.upper()}: child exited {rc}"
+                             f"{' (signal %d)' % -rc if rc < 0 else ''}")
+                lines += p.stderr.splitlines()[-6:]
+                e = {"source": src.name, "version": lab, "abi": a.abi,
+                     "status": what, "returncode": rc, "types": 0,
+                     "errors": 0, "bytes": 0}
+            else:
+                e = json.loads(entry.read_text()) if entry.exists() else None
+            with lock:
+                log("\n".join(lines))
+                if e:
+                    state["entries"] = core.upsert(state["entries"], e)
+                    core.save_manifest(state["entries"], out)
+                state["bad"] += rc != 0
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
-                log(f"  {what.upper()}: child exited {rc}"
-                    f"{' (signal %d)' % -rc if rc < 0 else ''}"
-                    )
-                    
-                entries = core.load_manifest(out)
-                entries = core.upsert(entries, {
-                    "source": src.name,
-                    "version": lab,
-                    "abi": a.abi,
-                    "status": what,
-                    "returncode": rc,
-                    "types": 0,
-                    "errors": 0,
-                    "bytes": 0
-                })
+    with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+        list(ex.map(run, jobs))
 
-                core.save_manifest(entries, out)
-            bad += rc != 0
-
-    return 1 if bad else 0
+    return 1 if state["bad"] else 0
 
 
 try:
