@@ -91,8 +91,7 @@ def main():
         "--sys-include",
         action="append",
         default=[],
-        help="extra system include dir (-I), repeatable; "
-        "needed for non-Windows ABIs"
+        help="extra system include dir (-I), repeatable"
     )
 
     ap.add_argument(

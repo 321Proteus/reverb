@@ -31,12 +31,10 @@ class Abi:
     # prepare_types_decl in src/formats/types_embed.hpp)
     subst: tuple
     bits: int = 64               # the database must be this wide (see Session)
-    windows: bool = True         # Windows SDK headers (xwin) apply
-    cxx: str = "c++"             # the -x language of C++ sources
     dummy_cc: tuple = ()         # compilers that can make a database for it
 
 
-# Adding an ABI is a row. Only msvc64 is exercised for now.
+# Adding an ABI is a row (the database must match its width: see Session).
 ABIS = {
     "msvc64": Abi("x86_64-pc-windows-msvc", "MSVC x64",
                   (("__RV_API", ""), ("__RV_THISCALL", ""),
@@ -46,16 +44,6 @@ ABIS = {
                   (("__RV_API", "__stdcall"), ("__RV_THISCALL", "__thiscall"),
                    ("__RV_ITANIUM_ONLY", "//"), ("__RV_MAC_ONLY", "//")),
                   bits=32, dummy_cc=("i686-w64-mingw32-gcc",)),
-    # Need system headers (--sys-include) and a database of that platform;
-    # the JUCE wrappers pull Cocoa headers on Apple
-    "itanium64": Abi("x86_64-linux-gnu", "Itanium x64 (Linux)",
-                     (("__RV_API", ""), ("__RV_THISCALL", ""),
-                      ("__RV_ITANIUM_ONLY", ""), ("__RV_MAC_ONLY", "//")),
-                     windows=False, dummy_cc=("cc", "gcc", "clang")),
-    "apple64": Abi("arm64-apple-darwin", "Apple arm64",
-                   (("__RV_API", ""), ("__RV_THISCALL", ""),
-                    ("__RV_ITANIUM_ONLY", ""), ("__RV_MAC_ONLY", "")),
-                   windows=False, cxx="objective-c++"),
 }
 
 
@@ -65,7 +53,7 @@ def ensure_db(abi, root=OUT_ROOT.parent):
     detected by IDA as MSVC; its 32-bit one as GNU, which breaks msvc32: see
     use_compiler)."""
     d = Path(root) / "dummy"
-    exe = d / (f"dummy_{abi}" + (".exe" if ABIS[abi].windows else ""))
+    exe = d / f"dummy_{abi}.exe"
     if exe.exists():
         return exe
     cc = next((c for c in ABIS[abi].dummy_cc if shutil.which(c)), None)
@@ -101,55 +89,11 @@ def substitute(text, abi):
 # so -U wins.
 UNDEF = ("__unaligned", "__ptr32", "__ptr64", "__restrict")
 
-# The Windows headers only trip over the four above, and they need IDA's
-# _MSC_VER / _WIN32 / _stdcall definitions. glibc/libstdc++ (and Apple's
-# libc++) use plain identifiers IDA also defines (`__tuple`, `__off`,
-# `__signed`...: `-D__tuple=struct[[clang::annotate]]`), so for the other ABIs
-# every such keyword-like macro IDA predefines is removed. The list is the
-# `-D__name=` set found in libida.so (IDA 9.4).
-UNDEF_IDA_KEYWORDS = (
-    "__array_ptr", "__at", "__bin", "__bitmask", "__char", "__cppobj",
-    "__custom", "__dec", "__enum", "__export", "__far", "__fixed", "__float",
-    "__gc", "__hex", "__huge", "__import", "__invbits", "__invsign",
-    "__lzero", "__near", "__noreturn", "__objc_interface", "__oct", "__off",
-    "__offset", "__pure", "__return_ptr", "__sbin", "__segm", "__shex",
-    "__shifted", "__signed", "__soct", "__spoi", "__stroff", "__strlit",
-    "__struct_ptr", "__swiftasync", "__swiftasynccall", "__swiftself",
-    "__swiftthrows", "__tabform", "__tuple", "__udec", "__unused",
-    "__usercall", "__userpurge")
-
-
-def host_includes():
-    """The include dirs of the host C++ compiler, as it reports them: where
-    Itanium (Linux) headers are on this machine. Empty if there is none."""
-    cxx = next((c for c in ("c++", "g++", "clang++") if shutil.which(c)), None)
-    if cxx is None:
-        return []
-    r = subprocess.run([cxx, "-E", "-x", "c++", "-v", "-"], input="",
-                       capture_output=True, text=True)
-    dirs, on = [], False
-    for line in r.stderr.splitlines():
-        if line.startswith("#include <...>"):
-            on = True
-        elif line.startswith("End of search list"):
-            break
-        elif on and line.startswith(" "):
-            dirs.append(os.path.normpath(line.strip()))
-    return dirs
-
-
 def system_includes(abi, xwin, extra=()):
-    """The platform headers for `abi`: the xwin splat for Windows ABIs; for
-    itanium64 what --sys-include gives, else the host compiler's; for the
-    rest only what --sys-include gives."""
+    """The platform headers for `abi`: the xwin splat, then any --sys-include."""
     x = str(xwin)
-    if ABIS[abi].windows:
-        win = [f"{x}/crt/include", f"{x}/sdk/include/ucrt",
-               f"{x}/sdk/include/um", f"{x}/sdk/include/shared"]
-        return win + list(extra)
-    if not extra and abi == "itanium64":
-        return host_includes()
-    return list(extra)
+    return [f"{x}/crt/include", f"{x}/sdk/include/ucrt",
+            f"{x}/sdk/include/um", f"{x}/sdk/include/shared"] + list(extra)
 
 
 def parser_args(abi, lang, includes, defines=()):
@@ -157,7 +101,7 @@ def parser_args(abi, lang, includes, defines=()):
     Only -I: IDA drops -isystem and treats its path as a second input file
     (quirk 1). -frtti is overridden by IDA anyway (quirk 3)."""
     kind = "c" if lang.startswith("c") and not lang.startswith("c++") \
-        else ABIS[abi].cxx
+        else "c++"
     args = [f"-x {kind} -std={lang}", f"-target {ABIS[abi].triple}", "-Xclang -skip-function-bodies"]
     if kind != "c":
         args.append("-frtti")
@@ -167,13 +111,22 @@ def parser_args(abi, lang, includes, defines=()):
         # (quirk 11); <stdbool.h> then maps bool back to the builtin _Bool
         args.append("-U_Bool")
     args += [f"-D{d}" for d in defines]
-    undef = UNDEF if ABIS[abi].windows else UNDEF + UNDEF_IDA_KEYWORDS
-    args += [f"-U{u}" for u in undef]
+    args += [f"-U{u}" for u in UNDEF]
     args += [f"-I{i}" for i in includes]
     return " ".join(args)
 
 
 # -------------------------------------------------------------- the session
+
+# IDA 9.4's MSVC compiler profile (what a database detected as MSVC has)
+MSVC_HEADER_PATH = "/Program Files/Microsoft Visual Studio/VC98/include"
+MSVC_MACROS = (
+    "_cdecl=__cdecl;_pascal=__pascal;_huge=__huge;_near=__near;_far=__far;"
+    "__inline=;_inline=;inline=;CM_WINNT;MPR50;_INTEGRAL_MAX_BITS=64;"
+    "_MSC_VER=1400;_CHAR_UNSIGNED=1;_M_IX86=300;__MT__=1;__TLS__=1;"
+    "_Windows=1;__WIN32__=1;_WIN32_WINNT=0x0500;WINVER=0x0500;_WIN32=1;"
+    "OLEDBVER=0x0250;SECURITY_WIN32;WIN32_SUPPORT;DBNTWIN32;W32SUT_32;")
+
 
 class Session:
     """One idalib database, for any number of sequential builds."""
@@ -193,13 +146,19 @@ class Session:
         self.db_bits = 64 if ida_ida.inf_is_64bit() else 32
 
     def use_compiler(self, abi):
-        """Windows ABIs parse as MSVC whatever compiler IDA detected in the
-        database (a mingw PE is detected as GNU, which adds host include dirs)."""
-        if ABIS[abi].windows:
-            import ida_ida
-            ida_ida.inf_set_cc_id(self.ti.COMP_MS)
-            if ida_ida.inf_get_cc_id() != self.ti.COMP_MS:
-                raise SystemExit("cannot select the MSVC compiler")
+        """Windows ABIs parse with IDA's MSVC profile whatever it detected in
+        the database. A mingw 32-bit PE is detected as GNU, and the database
+        then carries the GNU profile: host /usr/include and `__GNUC__`, which
+        pull glibc in. The compiler id alone does not change that, so the
+        header path and macros are set to the MSVC profile (as IDA's own for
+        a database detected as MSVC) too."""
+        import ida_ida
+        ida_ida.inf_set_cc_id(self.ti.COMP_MS)
+        if ida_ida.inf_get_cc_id() != self.ti.COMP_MS:
+            raise SystemExit("cannot select the MSVC compiler")
+        if self.ti.get_c_macros() != MSVC_MACROS:
+            self.ti.set_c_header_path(MSVC_HEADER_PATH)
+            self.ti.set_c_macros(MSVC_MACROS)
 
     def require_bits(self, abi):
         """-target only changes the builtin typedefs: IDA lays classes out
@@ -311,9 +270,12 @@ def check_anchors(sess, til, anchors):
 
 # ----------------------------------------------------------------- messages
 
-# dynamic_cast / typeid inside function bodies: IDA appends -fno-rtti
-# (quirk 3). They never affect types.
-_BENIGN = re.compile(r"dynamic_cast|typeid|-fno-rtti")
+# Errors that only occur inside function bodies and never affect types:
+# dynamic_cast / typeid (IDA appends -fno-rtti, quirk 3) and MS-style inline
+# assembly in the Windows SDK's x86 inline functions (IDA's clang has no
+# target registered for them).
+_BENIGN = re.compile(r"dynamic_cast|typeid|-fno-rtti|"
+                     r"MS-style inline assembly is not available")
 _DIAG = re.compile(r"^(?P<loc>.+?:\d+:\d+):? (?P<kind>error|fatal error):? "
                    r"(?P<msg>.*)$")
 
