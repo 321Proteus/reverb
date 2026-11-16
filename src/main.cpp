@@ -17,6 +17,8 @@
 #include "cxx/vtable/reconstruct.hpp"
 #include "formats/types_embed.hpp"
 #include "frameworks/framework.hpp"
+#include "db/til/til.hpp"
+#include "frameworks/til.hpp"
 #include "formats/vst2/vst2.hpp"
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
@@ -113,7 +115,13 @@ static rv::InterfaceSet detect() {
 	}
 
 	apply_interfaces(formats);
+	if (!formats.empty()) {
+		rv::til::Request req{ "Format", "formats" };
+		rv::til::load(req);
+	}
+
 	rv::set_detected_framework(rv::scan_framework());
+	rv::apply_framework_types(formats, rv::get_detected_framework());
 	return formats;
 }
 

@@ -8,5 +8,8 @@ target_sources(reverb PRIVATE
     report.hpp
     refs.hpp
     segments.hpp
+    til/til.cpp
+    til/til.hpp
+    til/pick.hpp
     types.hpp
 )
