@@ -205,20 +205,30 @@ class Session:
     def count(self, til):
         return len(self.names(til))
 
-    def reduce(self, src, roots, name, title):
-        """A new til holding the named types of `src` that start with one of
-        `roots`, plus everything those reference (copy_named_type copies the
-        dependencies). A parse of an SDK drags in the OS and STL headers'
-        types too (JUCE: 34,000 types, of which 4,000 are JUCE's and
-        Steinberg's); the closure of the SDK's own is what users need and
-        leaves almost no names IDA's own libraries (mssdk) also define.
-        -> (til, [roots that could not be copied])"""
+    def reduce(self, src, roots):
+        """Delete from `src`, in place, every named type that the types
+        starting with one of `roots` do not (transitively) reference. A parse
+        of an SDK drags in the OS and STL headers' types too (JUCE: 34,000
+        types, of which 4,000 are JUCE's and Steinberg's); the closure of the
+        SDK's own is what users need, and it leaves almost no names IDA's own
+        libraries (mssdk) also define.
+
+        The closure comes from copy_named_type into a scratch til, which
+        copies the dependencies but needs numbered types, and a til with
+        those cannot be added to a database (add_til refuses it) and cannot
+        drop them again. So that til is only measured and `src` is pruned.
+        -> (types kept, [roots that could not be copied])"""
         ti = self.ti
-        dst = ti.new_til(name, title)
-        ti.enable_numbered_types(dst, True)     # copy_named_type needs them
-        failed = [n for n in self.names(src)
-                  if n.startswith(roots) and not ti.copy_named_type(dst, src, n)]
-        return dst, failed
+        scratch = ti.new_til("closure_scratch.til", "scratch")
+        ti.enable_numbered_types(scratch, True)
+        names = self.names(src)
+        failed = [n for n in names if n.startswith(roots)
+                  and not ti.copy_named_type(scratch, src, n)]
+        keep = set(self.names(scratch))
+        for n in names:
+            if n not in keep:
+                ti.del_named_type(src, n, ti.NTF_TYPE)
+        return len(keep), failed
 
     # -- layout queries ------------------------------------------------
 
@@ -350,9 +360,7 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None,
                               if u.fallbacks else u.lang for u in plan.units))
     t0 = time.time()
     for n, attempt in enumerate(attempts):
-        # the parse til must not share the final til's name
-        til = sess.new_til(("full_" if reduce else "") + Path(out_path).name,
-                           title)
+        til = sess.new_til(Path(out_path).name, title)
         errs_total, msgs = 0, []
         for i, (u, lang) in enumerate(zip(plan.units, attempt)):
             probe = plan.workdir / f"probe{i}.h"
@@ -370,12 +378,14 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None,
     meta = {}
     if reduce:
         full_types = sess.count(til)
-        til, failed = sess.reduce(til, plan.roots, Path(out_path).name, title)
+        _, failed = sess.reduce(til, plan.roots)
         # what ships must still satisfy the anchors (a missing root shows here)
         problems = check_anchors(sess, til, plan.anchors)
         meta = {"types_full": full_types, "roots_failed": len(failed)}
         for n in failed[:3]:
             log(f"  could not copy {n}")
+    if til.flags & sess.ti.TIL_ORD:     # add_til refuses such a til
+        problems = problems + ["the til has numbered types: IDA cannot add it"]
     sess.finish(til, out_path)
     text = "\n".join(msgs)
     real = real_errors(text)

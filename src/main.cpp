@@ -34,8 +34,13 @@ static void load_types(rv::Interface iface) {
 			rv::get_interface_name(iface));
 		return;
 	}
+	const uint32 first = get_ordinal_limit();
 	parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
 	rv::mark_types_loaded(iface);
+
+	// the SDK types go in a folder of their own, as a framework's do
+	rv::til::group_local_types(
+		first, get_ordinal_limit(), rv::get_interface_name(iface));
 }
 
 static void apply_interfaces(rv::InterfaceSet is) {

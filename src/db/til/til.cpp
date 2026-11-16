@@ -52,6 +52,7 @@ static std::vector<TilEntry> search_tils(
 	qstring user_dir = get_user_idadir();
 	user_dir += "/til";
 	dirs.add(user_dir);
+	dirs.add(user_dir + "/pc");
 
 	scanner_t sc;
 	sc.name = req.name;
@@ -73,7 +74,7 @@ static std::vector<TilEntry> search_tils(
 	return std::move(sc.found);
 }
 
-static size_t group_types(uint32 first, uint32 last, const char* folder) {
+size_t group_local_types(uint32 first, uint32 last, const char* folder) {
 
 	dirtree_t* tree = get_std_dirtree(DIRTREE_LOCAL_TYPES);
 	if (tree == nullptr || first >= last) return 0;
@@ -117,10 +118,11 @@ static void import_types(til_t* src, const char* label, const char* folder) {
 	}
 
 	// copy_named_type gives its types consecutive new ordinals
-	const size_t grouped = group_types(first, get_ordinal_limit(local), folder);
+	const size_t grouped =
+		group_local_types(first, get_ordinal_limit(local), folder);
 
 	rv_log("%s types: %u imported into local types in %u ms (%u in the type "
-		   "library), %u failed; %u in the folder \"%s\"",
+		   "library), %u failed",
 		label, unsigned(get_ordinal_count(local) - before),
 		unsigned((get_nsec_stamp() - t0) / 1000000), unsigned(names.size()),
 		unsigned(failed), unsigned(grouped), folder);

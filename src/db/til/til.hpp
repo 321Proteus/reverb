@@ -17,4 +17,10 @@ struct Request {
 */
 bool load(const Request& req);
 
+/*
+	Move the local types with select ordinals into a folder of the
+   Local Types view
+*/
+size_t group_local_types(uint32 first, uint32 last, const char* folder);
+
 } // namespace rv::til
