@@ -7,7 +7,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from .core import REPO, Anchor, Plan, Unit, substitute, system_includes
+from .core import ABIS, REPO, Anchor, Plan, Unit, substitute, system_includes
 
 VST2_HEADER = REPO / "src" / "formats" / "vst2" / "types.h"
 
@@ -32,14 +32,18 @@ def clap_headers(clap_include):
     return sorted(glob.glob(f"{clap_include}/clap/**/*.h", recursive=True))
 
 
-def _sdk_version(sdk, clap):
-    """A label for the pinned SDKs: the CLAP version header, plus the VST3
-    SDK's own (VST3 has no version define in pluginterfaces; its folder
-    name stays as given)."""
-    v = (clap / "clap" / "version.h").read_text()
-    n = [re.search(rf"CLAP_VERSION_{k} (\d+)", v)[1]
-         for k in ("MAJOR", "MINOR", "REVISION")]
-    return f"vst3sdk+clap-{'.'.join(n)}"
+def vst3_version(sdk):
+    """The VST3 SDK's own version string (kVstVersionString), e.g. 3.8.1."""
+    f = Path(sdk) / "pluginterfaces" / "vst" / "vsttypes.h"
+    m = re.search(r'kVstVersionString\s*"VST ([\d.]+)"',
+                  f.read_text(errors="replace")) if f.exists() else None
+    return m[1] if m else "unknown"
+
+
+def clap_version(clap):
+    v = (Path(clap) / "clap" / "version.h").read_text()
+    return ".".join(re.search(rf"CLAP_VERSION_{k} (\d+)", v)[1]
+                    for k in ("MAJOR", "MINOR", "REVISION"))
 
 
 class Formats:
@@ -52,14 +56,20 @@ class Formats:
         self.xwin = xwin
 
     def versions(self):
-        return [_sdk_version(self.vst3, self.clap)]
+        return [f"vst3-{vst3_version(self.vst3)}+clap-{clap_version(self.clap)}"]
+
+    def title(self, version, abi):
+        """The description IDA shows for the til."""
+        return (f"REverb format types, {ABIS[abi].title}: VST3 SDK "
+                f"{vst3_version(self.vst3)}, CLAP {clap_version(self.clap)}, "
+                f"VST2 (hand-written)")
 
     def label(self, version):
         return version
 
     def out_path(self, root, version, abi):
         # one pinned version: the file is named by ABI only
-        return root / "formats" / f"{abi}.til"
+        return root / "formats" / f"rv_formats_{abi}.til"
 
     def plan(self, version, abi):
         wd = Path(tempfile.mkdtemp(prefix="tilgen_fmt_"))

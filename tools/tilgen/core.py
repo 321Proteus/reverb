@@ -312,10 +312,12 @@ class Plan:
     notes: list = field(default_factory=list)
 
 
-def build_one(sess, source, version, abi, plan, out_path, log):
+def build_one(sess, source, version, abi, plan, out_path, log, title=None):
     """Parse a plan's units into one til and store it. A unit's `fallbacks`
     languages are tried, for the whole plan, when the anchors do not hold.
-    -> manifest entry."""
+    The til's name is its file name (IDA lists a til by it); `title` is the
+    description IDA shows next to it. -> manifest entry."""
+    title = title or f"{source} {version} {ABIS[abi].title}"
     langs = [u.lang for u in plan.units]
     attempts = [tuple(langs)]
     for i in range(max((len(u.fallbacks) for u in plan.units), default=0)):
@@ -323,8 +325,7 @@ def build_one(sess, source, version, abi, plan, out_path, log):
                               if u.fallbacks else u.lang for u in plan.units))
     t0 = time.time()
     for n, attempt in enumerate(attempts):
-        til = sess.new_til(f"{source}_{version}_{abi}.til",
-                           f"{source} {version} {ABIS[abi].title}")
+        til = sess.new_til(Path(out_path).name, title)
         errs_total, msgs = 0, []
         for i, (u, lang) in enumerate(zip(plan.units, attempt)):
             probe = plan.workdir / f"probe{i}.h"
@@ -344,6 +345,7 @@ def build_one(sess, source, version, abi, plan, out_path, log):
     real = real_errors(text)
     entry = {
         "source": source, "version": version, "abi": abi,
+        "description": title,
         "file": str(Path(out_path).resolve().relative_to(REPO)
                     if Path(out_path).resolve().is_relative_to(REPO)
                     else Path(out_path).resolve()),

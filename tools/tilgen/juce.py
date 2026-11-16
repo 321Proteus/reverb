@@ -9,7 +9,7 @@ import tempfile
 import io
 from pathlib import Path
 
-from .core import Anchor, Plan, Unit, system_includes
+from .core import ABIS, Anchor, Plan, Unit, system_includes
 
 TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(-security)?$")
 MINIMUM = (5, 0, 0)
@@ -142,8 +142,14 @@ class Juce:
     def label(self, tag):
         return tag + (f"-{'-'.join(self.only)}-only" if self.only else "")
 
+    def title(self, label, abi):
+        """The description IDA shows for the til."""
+        what = "VST2 wrapper only" if self.only == ("vst2",) else \
+            "VST3 + VST2 wrappers"
+        return f"REverb JUCE {label} types, {ABIS[abi].title}: {what}"
+
     def out_path(self, root, version, abi):
-        return root / "juce" / abi / f"{version}.til"
+        return root / "juce" / abi / f"rv_juce_v{version}_{abi}.til"
 
     def extract(self, tag, dest):
         """`git archive` of the modules only: never touch the user's clone."""

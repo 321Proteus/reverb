@@ -137,7 +137,8 @@ def main():
                 plan = src.plan(ver, a.abi)
 
                 try:
-                    e = core.build_one(sess, src.name, lab, a.abi, plan, path, log)
+                    e = core.build_one(sess, src.name, lab, a.abi, plan, path, log,
+                                    src.title(lab, a.abi))
                 finally:
                     shutil.rmtree(plan.workdir, ignore_errors=True)
 
