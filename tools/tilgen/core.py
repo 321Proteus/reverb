@@ -193,14 +193,32 @@ class Session:
         if not self.ti.store_til(til, None, str(path)):
             raise RuntimeError(f"store_til failed for {path}")
 
-    def count(self, til):
-        """Named types; new_til has no ordinals (quirk 5)."""
-        ti, n = self.ti, 0
+    def names(self, til):
+        """Every named type, in til order (new_til has no ordinals, quirk 5)."""
+        ti, out = self.ti, []
         name = ti.first_named_type(til, ti.NTF_TYPE)
         while name:
-            n += 1
+            out.append(name)
             name = ti.next_named_type(til, name, ti.NTF_TYPE)
-        return n
+        return out
+
+    def count(self, til):
+        return len(self.names(til))
+
+    def reduce(self, src, roots, name, title):
+        """A new til holding the named types of `src` that start with one of
+        `roots`, plus everything those reference (copy_named_type copies the
+        dependencies). A parse of an SDK drags in the OS and STL headers'
+        types too (JUCE: 34,000 types, of which 4,000 are JUCE's and
+        Steinberg's); the closure of the SDK's own is what users need and
+        leaves almost no names IDA's own libraries (mssdk) also define.
+        -> (til, [roots that could not be copied])"""
+        ti = self.ti
+        dst = ti.new_til(name, title)
+        ti.enable_numbered_types(dst, True)     # copy_named_type needs them
+        failed = [n for n in self.names(src)
+                  if n.startswith(roots) and not ti.copy_named_type(dst, src, n)]
+        return dst, failed
 
     # -- layout queries ------------------------------------------------
 
@@ -310,13 +328,20 @@ class Plan:
     anchors: list
     workdir: Path = None         # a temp dir to remove afterwards
     notes: list = field(default_factory=list)
+    # Type-name prefixes of the SDK's own types. If given, the stored til is
+    # their closure (Session.reduce) instead of everything the headers pulled
+    # in; the anchors are checked on that til. () keeps the full til.
+    roots: tuple = ()
 
 
-def build_one(sess, source, version, abi, plan, out_path, log, title=None):
+def build_one(sess, source, version, abi, plan, out_path, log, title=None,
+              full=False):
     """Parse a plan's units into one til and store it. A unit's `fallbacks`
     languages are tried, for the whole plan, when the anchors do not hold.
     The til's name is its file name (IDA lists a til by it); `title` is the
-    description IDA shows next to it. -> manifest entry."""
+    description IDA shows next to it. `full` keeps the unreduced til even if
+    the plan has roots. -> manifest entry."""
+    reduce = bool(plan.roots) and not full
     title = title or f"{source} {version} {ABIS[abi].title}"
     langs = [u.lang for u in plan.units]
     attempts = [tuple(langs)]
@@ -325,7 +350,9 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None):
                               if u.fallbacks else u.lang for u in plan.units))
     t0 = time.time()
     for n, attempt in enumerate(attempts):
-        til = sess.new_til(Path(out_path).name, title)
+        # the parse til must not share the final til's name
+        til = sess.new_til(("full_" if reduce else "") + Path(out_path).name,
+                           title)
         errs_total, msgs = 0, []
         for i, (u, lang) in enumerate(zip(plan.units, attempt)):
             probe = plan.workdir / f"probe{i}.h"
@@ -340,6 +367,15 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None):
         log(f"  anchors failed with {'/'.join(attempt)} ({problems[0]}); "
             f"retrying with {'/'.join(attempts[n + 1])}")
 
+    meta = {}
+    if reduce:
+        full_types = sess.count(til)
+        til, failed = sess.reduce(til, plan.roots, Path(out_path).name, title)
+        # what ships must still satisfy the anchors (a missing root shows here)
+        problems = check_anchors(sess, til, plan.anchors)
+        meta = {"types_full": full_types, "roots_failed": len(failed)}
+        for n in failed[:3]:
+            log(f"  could not copy {n}")
     sess.finish(til, out_path)
     text = "\n".join(msgs)
     real = real_errors(text)
@@ -355,6 +391,7 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None):
         "std": "/".join(attempt),
         "status": "ok" if not problems else "anchor-fail",
         "problems": problems, "seconds": round(time.time() - t0, 1),
+        "reduced": reduce, **meta,
     }
     if n:
         entry["fallback"] = True

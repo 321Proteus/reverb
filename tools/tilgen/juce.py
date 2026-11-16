@@ -119,6 +119,14 @@ def anchors_for(v, abi, only=()):
     return anchors
 
 
+# Names of what JUCE's own sources and its bundled SDKs define (the rest of a
+# til is the OS and STL headers' types). JUCE's wrapper classes are in the
+# global namespace, the VST2/ARA/VST3 helper SDKs have their own. The anchors
+# are checked on the reduced til, so a missing root shows up as a failure.
+ROOTS = ("juce::", "Juce", "Steinberg::", "VST3::", "Vst2::", "ARA::",
+         "AEffect", "Vst", "fx")
+
+
 class Juce:
     name = "juce"
 
@@ -187,4 +195,4 @@ class Juce:
             text += f'#include "{w}"\n'
             units.append(Unit(text, "c++17", ("c++14",)))
         return Plan(units, includes + system_includes(abi, self.xwin, self.sys_inc),
-                    anchors_for(v, abi, self.only), wd, notes)
+                    anchors_for(v, abi, self.only), wd, notes, ROOTS)

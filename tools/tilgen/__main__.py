@@ -62,6 +62,12 @@ def main():
     )
 
     ap.add_argument(
+        "--full",
+        action="store_true",
+        help="keep the full til (default: the SDK's own types and their references)"
+    )
+
+    ap.add_argument(
         "--inprocess",
         action="store_true",
         help="build in this process (default: one child process "
@@ -138,7 +144,7 @@ def main():
 
                 try:
                     e = core.build_one(sess, src.name, lab, a.abi, plan, path, log,
-                                    src.title(lab, a.abi))
+                                    src.title(lab, a.abi), a.full)
                 finally:
                     shutil.rmtree(plan.workdir, ignore_errors=True)
 
@@ -213,6 +219,8 @@ def run_children(a, sources, out, log):
                 cmd += ["--vst3", a.vst3]
             if a.only:
                 cmd += ["--only", a.only]
+            if a.full:
+                cmd += ["--full"]
             for d in a.sys_include:
                 cmd += ["--sys-include", d]
 
