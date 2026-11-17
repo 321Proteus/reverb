@@ -24,32 +24,44 @@
 #include "ui/report.hpp"
 #include "db/report.hpp"
 
-// A format probe may have loaded the types before detection ends
-static void load_types(rv::Interface iface) {
-	if (rv::get_loaded_types().has(iface)) return;
+static bool format_til(bool import) {
 
-	const char* decl_src = rv::get_types_decl(iface);
-	if (decl_src == nullptr) {
-		rv_log("No type declarations compiled in for %s",
-			rv::get_interface_name(iface));
-		return;
-	}
-	const uint32 first = get_ordinal_limit();
-	parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
-	rv::mark_types_loaded(iface);
+	rv::til::Request req{ "Format", "formats" };
 
-	// the SDK types go in a folder of their own, as a framework's do
-	rv::til::group_local_types(
-		first, get_ordinal_limit(), rv::get_interface_name(iface));
+	req.import_types = import;
+	return rv::til::load(req);
 }
 
-static void apply_interfaces(rv::InterfaceSet is) {
+static void load_types(rv::Interface iface, bool from_til) {
+	if (rv::get_loaded_types().has(iface)) return;
+
+	if (!from_til) {
+		const char* decl_src = rv::get_types_decl(iface);
+
+		if (decl_src == nullptr) {
+			rv_log("No type declarations compiled in for %s",
+				rv::get_interface_name(iface));
+			return;
+		}
+
+		const uint32 first = get_ordinal_limit();
+
+		parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+
+		rv::til::group_local_types(
+			first, get_ordinal_limit(), rv::get_interface_name(iface));
+	}
+
+	rv::mark_types_loaded(iface);
+}
+
+static void apply_interfaces(rv::InterfaceSet is, bool from_til) {
 
 	rv::set_detected_interfaces(is);
 
-	is.for_each([](rv::Interface iface) {
+	is.for_each([from_til](rv::Interface iface) {
 		rv_log("Plugin interface %s detected", rv::get_interface_name(iface));
-		load_types(iface);
+		load_types(iface, from_til);
 	});
 }
 
@@ -115,15 +127,13 @@ static rv::InterfaceSet detect() {
 
 	if (formats.empty() && main_ea != BADADDR) {
 		rv_log("Ambiguous main export, probing for VST2");
-		load_types(rv::Interface::VST2);
+		if (!format_til(false)) load_types(rv::Interface::VST2, false);
 		if (rv::vst2::check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
 	}
 
-	apply_interfaces(formats);
-	if (!formats.empty()) {
-		rv::til::Request req{ "Format", "formats" };
-		rv::til::load(req);
-	}
+	bool from_til = false;
+	if (!formats.empty()) from_til = format_til(true);
+	apply_interfaces(formats, from_til);
 
 	rv::set_detected_framework(rv::scan_framework());
 	rv::apply_framework_types(formats, rv::get_detected_framework());
