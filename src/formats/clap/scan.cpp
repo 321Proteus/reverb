@@ -17,7 +17,7 @@ namespace rv::clap {
 
 struct entry_info_t {
 	ea_t ea = BADADDR;
-	abi::clap_version_t version{};
+	version_t version{};
 	fn_ref_t init, deinit, get_factory;
 };
 
