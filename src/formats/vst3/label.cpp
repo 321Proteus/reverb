@@ -3,6 +3,7 @@
 #include <hexrays.hpp>
 #include <name.hpp>
 #include "core/log.hpp"
+#include "db/type_name.hpp"
 #include "vst3.hpp"
 #include "finders.hpp"
 #include "decomp/analysis.hpp"
@@ -79,14 +80,13 @@ void rv::vst3::label_factory() {
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
-		// clang-format off
+
+		const qstring v3 = vst3_type("IPluginFactory3_vtbl");
+		const qstring v2 = vst3_type("IPluginFactory2_vtbl");
+		const qstring v1 = vst3_type("IPluginFactory_vtbl");
+
 		const qstring vtbl_type = vtbl::pick_type(
-			h.vtable_ea, {
-				"Steinberg::IPluginFactory3_vtbl",
-				"Steinberg::IPluginFactory2_vtbl",
-				"Steinberg::IPluginFactory_vtbl"
-			});
-		// clang-format on
+			h.vtable_ea, { v3.c_str(), v2.c_str(), v1.c_str() });
 
 		if (vtbl_type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);
@@ -121,8 +121,9 @@ void rv::vst3::label_factory() {
 			continue;
 		};
 
-		int idx = qisdigit(vtbl_type.at(14)) ? 15 : 14;
-		qstring type = vtbl_type.substr(0, idx);
+		qstring type = vtbl_type;
+		if (type.length() > 5 && type.substr(type.length() - 5) == "_vtbl")
+			type.remove_last(5);
 
 		tinfo_t ti;
 		if (!ti.get_named_type(nullptr, type.c_str())) {

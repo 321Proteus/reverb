@@ -2,6 +2,7 @@
 #include "core/log.hpp"
 #include "db/read.hpp"
 #include "db/types.hpp"
+#include "db/type_name.hpp"
 #include "decomp/call.hpp"
 #include <bytes.hpp>
 #include <cstring>
@@ -152,7 +153,8 @@ void find_class_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
 	layout_t layout;
-	if (!load_layout("Steinberg::PClassInfo2", CLASS_INFO_MEMBERS, layout))
+	if (!load_layout(
+			vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, layout))
 		return;
 	const int64 card_off = layout.find("cardinality")->off;
 
@@ -164,7 +166,7 @@ void find_class_infos(
 			continue;
 
 		factory_struct_t h;
-		h.type = "Steinberg::PClassInfo2";
+		h.type = "PClassInfo2";
 		h.root = m.loc.var;
 		h.base_off = m.loc.off - card_off;
 		if (!seen.insert({ h.root, h.base_off }).second) continue;
@@ -313,9 +315,9 @@ void lower_call_args(
 	factory_collector_t& col, const std::vector<call_t>& calls) {
 	layout_t cls, info;
 	const bool have_cls =
-		load_layout("Steinberg::PClassInfo2", CLASS_INFO_MEMBERS, cls);
-	const bool have_info =
-		load_layout("Steinberg::PFactoryInfo", FACTORY_INFO_MEMBERS, info);
+		load_layout(vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, cls);
+	const bool have_info = load_layout(
+		vst3_type("PFactoryInfo").c_str(), FACTORY_INFO_MEMBERS, info);
 	const bool com = inf_get_filetype() == f_PE;
 
 	uint32 uid[4] = {};
@@ -338,11 +340,13 @@ void find_factory_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
 	layout_t classes;
-	if (!load_layout("Steinberg::PClassInfo2", CLASS_INFO_MEMBERS, classes))
+	if (!load_layout(
+			vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, classes))
 		return;
 
 	layout_t layout;
-	if (!load_layout("Steinberg::PFactoryInfo", FACTORY_INFO_MEMBERS, layout))
+	if (!load_layout(
+			vst3_type("PFactoryInfo").c_str(), FACTORY_INFO_MEMBERS, layout))
 		return;
 	const int64 url_off = layout.find("url")->off;
 	const int64 email_off = layout.find("email")->off;

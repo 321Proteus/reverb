@@ -2,6 +2,7 @@
 #include "core/log.hpp"
 #include "cxx/vtable.hpp"
 #include "db/read.hpp"
+#include "db/type_name.hpp"
 #include "db/segments.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/call.hpp"
@@ -155,12 +156,10 @@ void apply_class(const class_rec_t& r, const qstring& fname) {
 
 	if (!is_userti(r.create)) {
 		qstring d;
-		tinfo_t t;
+		const qstring unk = resolve_type(VST3_SCOPE, "FUnknown");
 
 		d.sprnt("%s f(void *context);",
-			t.get_named_type(nullptr, "Steinberg::FUnknown")
-				? "Steinberg::FUnknown *"
-				: "void *");
+			unk.empty() ? "void *" : (unk + " *").c_str());
 
 		if (apply_definite_proto(r.create, d.c_str()))
 			rv_log("    %a: prototype applied", r.create);
@@ -211,8 +210,11 @@ struct return_var_finder_t : public ctree_visitor_t {
 };
 
 bool vtbl_fits(const qstring& iface, ea_t vt, size_t* size = nullptr) {
+	const qstring vtbl = resolve_type(VST3_SCOPE, (iface + "_vtbl").c_str());
 	tinfo_t t;
-	if (!t.get_named_type(nullptr, (iface + "_vtbl").c_str()) || !t.is_struct())
+
+	if (vtbl.empty() || !t.get_named_type(nullptr, vtbl.c_str()) ||
+		!t.is_struct())
 		return false;
 
 	const size_t sz = t.get_size();
@@ -571,7 +573,7 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 
 	std::vector<class_rec_t> recs, unmatched;
 	for (const factory_struct_t& s : structs) {
-		if (!s.type || strcmp(s.type, "Steinberg::PClassInfo2") != 0) continue;
+		if (!s.type || strcmp(s.type, "PClassInfo2") != 0) continue;
 
 		class_rec_t r;
 		r.s = &s;

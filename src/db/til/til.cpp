@@ -1,6 +1,7 @@
 #include "til.hpp"
 #include "core/log.hpp"
 #include "db/til/pick.hpp"
+#include "db/type_name.hpp"
 #include <diskio.hpp>
 #include <dirtree.hpp>
 #include <ida.hpp>
@@ -222,6 +223,8 @@ bool load(const Request& req) {
 				chosen->suffix.c_str());
 		import_types(t, req.label, folder.c_str());
 	}
+
+	reset_type_cache();
 
 	return true;
 }

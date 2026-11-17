@@ -1,4 +1,5 @@
 #include "core/log.hpp"
+#include "db/type_name.hpp"
 #include "formats/format.hpp"
 #include "core/reverb.hpp"
 #include <auto.hpp>
@@ -47,6 +48,8 @@ static void load_types(rv::Interface iface, bool from_til) {
 		const uint32 first = get_ordinal_limit();
 
 		parse_decls(nullptr, rv::prepare_types_decl(decl_src).c_str(), msg, 0);
+
+		rv::reset_type_cache();
 
 		rv::til::group_local_types(
 			first, get_ordinal_limit(), rv::get_interface_name(iface));
