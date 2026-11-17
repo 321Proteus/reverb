@@ -79,9 +79,14 @@ void rv::vst3::label_factory() {
 	for (auto& h : vfinder.hits) {
 
 		if (h.this_offset || !may_be_factory(h.vtable_ea)) continue;
+		// clang-format off
 		const qstring vtbl_type = vtbl::pick_type(
-			h.vtable_ea, { "IPluginFactory3_vtbl", "IPluginFactory2_vtbl",
-							 "IPluginFactory_vtbl" });
+			h.vtable_ea, {
+				"Steinberg::IPluginFactory3_vtbl",
+				"Steinberg::IPluginFactory2_vtbl",
+				"Steinberg::IPluginFactory_vtbl"
+			});
+		// clang-format on
 
 		if (vtbl_type.empty()) {
 			rv_log("Labelling vtable failed at %a", h.vtable_ea);

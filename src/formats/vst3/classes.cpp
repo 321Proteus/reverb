@@ -158,7 +158,9 @@ void apply_class(const class_rec_t& r, const qstring& fname) {
 		tinfo_t t;
 
 		d.sprnt("%s f(void *context);",
-			t.get_named_type(nullptr, "FUnknown") ? "FUnknown *" : "void *");
+			t.get_named_type(nullptr, "Steinberg::FUnknown")
+				? "Steinberg::FUnknown *"
+				: "void *");
 
 		if (apply_definite_proto(r.create, d.c_str()))
 			rv_log("    %a: prototype applied", r.create);
@@ -569,7 +571,7 @@ void label_classes(cfunc_t* cf, const std::vector<factory_struct_t>& structs) {
 
 	std::vector<class_rec_t> recs, unmatched;
 	for (const factory_struct_t& s : structs) {
-		if (!s.type || strcmp(s.type, "PClassInfo2") != 0) continue;
+		if (!s.type || strcmp(s.type, "Steinberg::PClassInfo2") != 0) continue;
 
 		class_rec_t r;
 		r.s = &s;
