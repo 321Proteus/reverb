@@ -69,7 +69,8 @@ inline bool load_layout(const char* type, const char* const* members, size_t n,
 	layout_t& out, int expected_size = 0, bool require_all = true) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
-		rv_log("%s not found in local types - was types.h parsed?", type);
+		rv_log("%s not found in local types - was the type declaration parsed?",
+			type);
 		return false;
 	}
 
@@ -135,7 +136,8 @@ inline void flatten_members(
 inline bool load_layout(const char* type, layout_t& out) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
-		rv_log("%s not found in local types - was types.h parsed?", type);
+		rv_log("%s not found in local types - was the type declaration parsed?",
+			type);
 		return false;
 	}
 
