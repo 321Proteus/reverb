@@ -148,6 +148,7 @@ static ssize_t idaapi ui_event_cb(
 
 	if (notification_code == ui_database_closed) {
 		g_pending = pending_t::NONE;
+		rv::reset_type_cache();
 		rv::panel::close();
 		rv::report::clear();
 		return 0;
