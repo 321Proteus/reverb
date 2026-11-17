@@ -41,7 +41,7 @@ int main() {
 	CHECK(e.suffix == "security" && e.v.patch == 13);
 	CHECK(parse_file_name(
 		"rv_juce_v7.0.3-vst2-only_msvc64.til", "juce", "msvc64", &e));
-	CHECK(e.vst2_only());
+	CHECK(e.suffix == "vst2-only");
 	CHECK(!parse_file_name("rv_juce_v8.0.9_msvc32.til", "juce", "msvc64", &e));
 	CHECK(!parse_file_name("rv_formats_msvc64.til", "juce", "msvc64", &e));
 	CHECK(!parse_file_name("rv_juce_v8.0_msvc64.til", "juce", "msvc64", &e));
@@ -71,33 +71,31 @@ int main() {
 	CHECK(tils.size() == 7);
 
 	// the last tag not above the version
-	Pick p = pick(tils, ver("8.0.9"), false);
+	Pick p = pick(tils, ver("8.0.9"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v8.0.9_msvc64" && !p.too_new);
-	p = pick(tils, ver("8.0.8"), false);
+	p = pick(tils, ver("8.0.8"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v7.0.13-security_msvc64");
-	p = pick(tils, ver("5.4.9"), false);
+	p = pick(tils, ver("5.4.9"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v5.4.7_msvc64" && !p.too_new);
 
 	// newer than every tag: the newest, flagged
-	p = pick(tils, ver("9.0.5"), false);
+	p = pick(tils, ver("9.0.5"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v8.0.9_msvc64" && p.too_new);
 
 	// older than the first: nothing
-	p = pick(tils, ver("4.3.1"), false);
+	p = pick(tils, ver("4.3.1"));
 	CHECK(p.entry == nullptr && !p.too_new);
 
-	// 7.0.3 has only a VST2 til: VST2 plugins get it, VST3 ones fall back
-	p = pick(tils, ver("7.0.3"), true);
+	// 7.0.3 has only the VST2-only til: a plain pick takes it (the caller
+	// maps VST3 plugins of that version to 7.0.2)
+	p = pick(tils, ver("7.0.3"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v7.0.3-vst2-only_msvc64");
-	CHECK(!p.partial_skipped);
-	p = pick(tils, ver("7.0.3"), false);
+	p = pick(tils, ver("7.0.2"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v7.0.2_msvc64");
-	CHECK(p.partial_skipped);
-	p = pick(tils, ver("7.0.4"), false);
+	p = pick(tils, ver("7.0.4"));
 	CHECK(p.entry && p.entry->name == "rv_juce_v7.0.4_msvc64");
-	CHECK(!p.partial_skipped);
 
-	CHECK(pick({}, ver("8.0.9"), true).entry == nullptr);
+	CHECK(pick({}, ver("8.0.9")).entry == nullptr);
 
 	if (failures == 0) std::printf("til_pick: all passed\n");
 	return failures == 0 ? 0 : 1;

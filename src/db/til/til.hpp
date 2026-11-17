@@ -7,8 +7,7 @@ struct Request {
 	const char* label;
 	const char* name; // the files: rv_<name>[_v<version>]_<abi>.til
 	const char* version = nullptr; // nullptr if unversioned
-	bool vst3 = false;
-	bool import_types = false; // also copy every type into the local types
+	bool import_types = true;	   // also copy every type into the local types
 };
 
 /*

@@ -35,8 +35,6 @@ struct TilEntry {
 	std::string suffix;
 	std::string file; // full path
 	std::string name; // file name without extension
-
-	bool vst2_only() const { return suffix == "vst2-only"; }
 };
 
 inline bool starts_with(const std::string& s, const std::string& p) {
@@ -95,24 +93,18 @@ inline bool parse_file_name(const std::string& fname, const std::string& fw,
 struct Pick {
 	const TilEntry* entry = nullptr; // nullptr if too old
 	bool too_new = false;
-	bool partial_skipped = false; // a VST2-only til was passed over
 };
 
 /*
 	The newest til whose version is not above v. Newer than all of them picks
-	the newest one (too_new). A VST2-only til is eligible only if
-   allow_vst2_only, i.e. when the plugin has no VST3 interface to find types for
+	the newest one (too_new)
 */
-inline Pick pick(
-	const std::vector<TilEntry>& all, const Version& v, bool allow_vst2_only) {
-
+inline Pick pick(const std::vector<TilEntry>& all, const Version& v) {
 	Pick p;
 	Version newest;
 	bool any = false;
 
 	for (const TilEntry& e : all) {
-		if (e.vst2_only() && !allow_vst2_only) continue;
-
 		if (!any || newest < e.v) newest = e.v;
 		any = true;
 
@@ -124,17 +116,6 @@ inline Pick pick(
 	}
 
 	p.too_new = p.entry != nullptr && newest < v;
-
-	if (!allow_vst2_only) {
-		for (const TilEntry& e : all) {
-
-			if (!e.vst2_only() || v < e.v) continue;
-
-			if (p.entry == nullptr || p.entry->v < e.v)
-				p.partial_skipped = true;
-		}
-	}
-
 	return p;
 }
 

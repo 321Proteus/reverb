@@ -121,11 +121,10 @@ static void import_types(til_t* src, const char* label, const char* folder) {
 	const size_t grouped =
 		group_local_types(first, get_ordinal_limit(local), folder);
 
-	rv_log("%s types: %u imported into local types in %u ms (%u in the type "
-		   "library), %u failed",
-		label, unsigned(get_ordinal_count(local) - before),
-		unsigned((get_nsec_stamp() - t0) / 1000000), unsigned(names.size()),
-		unsigned(failed), unsigned(grouped), folder);
+	rv_log("%s types: %u imported into local types in %u ms, %u failed", label,
+		unsigned(get_ordinal_count(local) - before),
+		unsigned((get_nsec_stamp() - t0) / 1000000), unsigned(failed),
+		unsigned(grouped), folder);
 }
 
 bool load(const Request& req) {
@@ -166,7 +165,7 @@ bool load(const Request& req) {
 
 	if (req.version != nullptr) {
 
-		const Pick p = pick(tils, v, !req.vst3);
+		const Pick p = pick(tils, v);
 
 		if (p.entry == nullptr) {
 			rv_log("%s types: %s is older than the oldest type library, none "
@@ -174,11 +173,6 @@ bool load(const Request& req) {
 				req.label, req.version);
 			return false;
 		}
-
-		if (p.partial_skipped)
-			rv_log("%s types: the type library for %s holds only VST2 types "
-				   "(its VST3 wrapper crashes IDA's parser); using %s",
-				req.label, req.version, p.entry->name.c_str());
 
 		if (p.too_new)
 			rv_log("%s types: warning: %s is newer than every type library; "
