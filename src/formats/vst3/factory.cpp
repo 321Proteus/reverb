@@ -95,6 +95,26 @@ struct factory_collector_t : public store_collector_t {
 	}
 
 	int idaapi visit_expr(cexpr_t* e) override {
+
+		if (e->op == cot_call && e->x->op == cot_helper && e->a != nullptr &&
+			e->a->size() >= 2 && streq(e->x->helper, "strcpy")) {
+
+			cexpr_t* src = strip_casts(&e->a->at(1));
+			loc_t at;
+
+			if (src->op == cot_str && fold_addr(&e->a->at(0), &alias, at)) {
+				store_t s;
+				s.loc = at;
+				s.ea = e->ea;
+				s.text = expr_str(e, cf);
+				s.val.t = val_t::STR;
+				s.val.str = src->string;
+				s.size = int(strlen(src->string)) + 1; // with the NUL
+				stores.push_back(std::move(s));
+			}
+
+			return 0;
+		}
 		if (e->op == cot_sub) {
 			add_copy(e);
 			return 0;
@@ -123,7 +143,8 @@ static bool string_image(const std::vector<store_t>& stores, int root,
 			s.loc.off + s.size <= foff)
 			continue;
 
-		const bool known = !s.is_or && s.val.t == val_t::NUM;
+		const bool known =
+			!s.is_or && (s.val.t == val_t::NUM || s.val.t == val_t::STR);
 		if (known) last_ea = s.ea;
 
 		for (int i = 0; i < s.size; i++) {
@@ -132,7 +153,9 @@ static bool string_image(const std::vector<store_t>& stores, int root,
 
 			int b = -1;
 			if (known) {
-				if (s.val.raw_len > 0)
+				if (s.val.t == val_t::STR)
+					b = i < int(s.val.str.length()) ? uchar(s.val.str[i]) : 0;
+				else if (s.val.raw_len > 0)
 					b = (i < s.val.raw_len) ? s.val.raw[i] : -1;
 
 				else if (i < 8)

@@ -99,6 +99,8 @@ void resolve_fields(const std::vector<field_desc_t>& fields, object_fields_t& o,
 
 			} else if (v.t == val_t::ADDR || v.t == val_t::LOCAL) {
 				if (rel != 0 || s.size < psz) continue;
+			} else if (v.t == val_t::STR) {
+				if (rel != 0 || (f.kind != F_STR && f.kind != F_CSTR)) continue;
 			}
 
 			o.fields[f.name] = { v, s.ea };
