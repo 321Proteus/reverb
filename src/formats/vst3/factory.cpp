@@ -1,5 +1,8 @@
 #include "factory.hpp"
 #include "core/log.hpp"
+#include "cxx/rtti/abi.hpp"
+#include "cxx/vtable/apply.hpp"
+#include "cxx/vtable/hexrays.hpp"
 #include "db/read.hpp"
 #include "db/types.hpp"
 #include "db/type_name.hpp"
@@ -32,6 +35,12 @@ constexpr const char* FACTORY_INFO_MEMBERS[] = { "vendor", "url", "email",
 
 constexpr const char* CLASS_INFO_MEMBERS[] = { "cid", "cardinality", "category",
 	"name", "classFlags", "subCategories", "vendor", "version", "sdkVersion" };
+
+struct embed_hint_t {
+	int root;
+	int64 base_off;
+	const char* type;
+};
 
 /*
 	Adds stores to globals, and the inlined strncpy8 calls.
@@ -101,6 +110,57 @@ struct factory_collector_t : public store_collector_t {
 	}
 };
 
+// A char array written as immediates, the bytes of every NUM store that
+// overlaps
+static bool string_image(const std::vector<store_t>& stores, int root,
+	int64 foff, int sz, qstring& out, ea_t& last_ea) {
+	last_ea = BADADDR;
+	if (sz <= 0 || inf_is_be()) return false;
+	std::vector<int> img(sz, -1);
+
+	for (const store_t& s : stores) {
+		if (s.loc.var != root || s.loc.off >= foff + sz ||
+			s.loc.off + s.size <= foff)
+			continue;
+
+		const bool known = !s.is_or && s.val.t == val_t::NUM;
+		if (known) last_ea = s.ea;
+
+		for (int i = 0; i < s.size; i++) {
+			const int64 at = s.loc.off + i - foff;
+			if (at < 0 || at >= sz) continue;
+
+			int b = -1;
+			if (known) {
+				if (s.val.raw_len > 0)
+					b = (i < s.val.raw_len) ? s.val.raw[i] : -1;
+
+				else if (i < 8)
+					b = int((s.val.num >> (8 * i)) & 0xFF);
+
+				else if (!s.val.num)
+					b = 0;
+			}
+
+			img[at] = b;
+		}
+	}
+
+	out.clear();
+	for (int i = 0; i < sz; i++) {
+		if (img[i] < 0) return false; // unknown byte before the terminator
+		if (img[i] == 0) return out.length() >= 1 && is_text(out);
+		out += char(img[i]);
+	}
+	return false; // not terminated
+}
+
+bool has_copy(const factory_collector_t& col, int root, int64 off) {
+	for (const store_t& c : col.copies)
+		if (c.loc.var == root && c.loc.off == off) return true;
+	return false;
+}
+
 // The collected stores, plus what only the layout can turn into stores
 std::vector<store_t> stores_for(const factory_collector_t& col,
 	const layout_t& layout, const factory_struct_t& h) {
@@ -123,6 +183,17 @@ std::vector<store_t> stores_for(const factory_collector_t& col,
 			pieces.loc = loc_t{ h.root, foff };
 			pieces.size = f.sz;
 			out.push_back(std::move(pieces));
+		}
+
+		if (f.kind == F_STR && !has_copy(col, h.root, foff)) {
+			qstring str;
+			ea_t ea;
+			if (string_image(col.stores, h.root, foff, f.sz, str, ea)) {
+				store_t s = num_store(loc_t{ h.root, foff }, f.sz, 0, ea);
+				s.val.t = val_t::STR;
+				s.val.str = str;
+				out.push_back(std::move(s));
+			}
 		}
 
 		for (const store_t& c : col.copies) {
@@ -178,19 +249,13 @@ void find_class_infos(
 		// Rejects a plain INT_MAX stored in the same function
 		qstring category;
 		auto c = h.fields.find("category");
-		if (c == h.fields.end() || c->second.v.t != val_t::ADDR ||
-			!read_utf8(c->second.v.ea, category) || category.empty()) {
+
+		if (str_field(h, "category", category) && !category.empty()) {
 			rv_log("  -> rejected: category is not a constant string");
 			continue;
 		}
 		out.push_back(std::move(h));
 	}
-}
-
-bool has_copy(const factory_collector_t& col, int root, int64 off) {
-	for (const store_t& c : col.copies)
-		if (c.loc.var == root && c.loc.off == off) return true;
-	return false;
 }
 
 store_t raw_store(loc_t at, const uchar* raw, int size, ea_t ea) {
@@ -379,6 +444,35 @@ void find_factory_infos(
 	}
 }
 
+std::vector<embed_hint_t> get_embedded(cfunc_t* cf) {
+	std::vector<embed_hint_t> out;
+
+	tinfo_t info;
+	if (!info.get_named_type(nullptr, vst3_type("PFactoryInfo").c_str()))
+		return out;
+
+	vtbl::store_finder_t vf;
+	vf.apply_to(&cf->body, nullptr);
+
+	for (const auto& h : vf.hits) {
+		if (h.this_offset) continue;
+
+		rtti::class_info ci;
+		if (!rtti::parse_rtti(h.vtable_ea, &ci)) continue;
+
+		const tinfo_t cls = find_class_type(ci.name);
+		if (cls.empty()) continue; // no til for this framework
+
+		int64 off;
+		if (!find_embedded(cls, info, 0, off)) continue;
+
+		rv_log("  %s keeps PFactoryInfo at +0x%llX", ci.name.c_str(),
+			(unsigned long long)off);
+		out.push_back({ h.var_idx, off, "PFactoryInfo" });
+	}
+	return out;
+}
+
 } // namespace
 
 std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
@@ -397,6 +491,27 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 
 	lower_call_args(col, cc.calls);
 
+	bool have_info = false;
+	for (const embed_hint_t& e : get_embedded(cf)) {
+		layout_t layout;
+		if (!load_layout(
+				vst3_type(e.type).c_str(), FACTORY_INFO_MEMBERS, layout))
+			continue;
+
+		factory_struct_t h;
+		h.type = e.type;
+		h.root = e.root;
+		h.base_off = e.base_off;
+
+		resolve(col, layout, h);
+		out.push_back(std::move(h));
+		have_info = true;
+	}
+
+	find_class_infos(col, out);
+	if (!have_info) find_factory_infos(col, out); // anchor fallback
+	return out;
+
 	find_class_infos(col, out);
 	find_factory_infos(col, out);
 	return out;
@@ -405,8 +520,14 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 bool str_field(const factory_struct_t& s, const char* f, qstring& out) {
 	auto it = s.fields.find(f);
 
-	return it != s.fields.end() && it->second.v.t == val_t::ADDR &&
-		   read_utf8(it->second.v.ea, out);
+	if (it == s.fields.end()) return false;
+	const val_t& v = it->second.v;
+
+	if (v.t == val_t::STR) {
+		out = v.str;
+		return true;
+	}
+	return v.t == val_t::ADDR && read_utf8(v.ea, out);
 }
 
 bool num_field(const factory_struct_t& s, const char* f, uint64& out) {

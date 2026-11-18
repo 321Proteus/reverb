@@ -19,12 +19,13 @@ struct loc_t {
 
 // What was stored in a memory location
 struct val_t {
-	enum val_type_t { UNKNOWN, NUM, ADDR, LOCAL } t = UNKNOWN;
+	enum val_type_t { UNKNOWN, NUM, ADDR, LOCAL, STR } t = UNKNOWN;
 	uint64 num = 0;
 	ea_t ea = BADADDR;
 	loc_t loc;
 	uchar raw[16] = {};
 	int raw_len = 0;
+	qstring str; // STR: characters assembled from immediate stores
 };
 
 // A single store

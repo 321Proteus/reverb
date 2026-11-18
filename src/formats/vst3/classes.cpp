@@ -531,7 +531,7 @@ void type_object(const class_rec_t& r) {
 			continue;
 		}
 
-		vtbl::pin(vt, vst3_type((iface + "_vtbl").c_str()).c_str());
+		vtbl::pin(vt, (iface + "_vtbl").c_str());
 		rv_log("  object of \"%s\": vtable %a at +0x%llX -> %s", r.name.c_str(),
 			vt, (uint64)off, iface.c_str());
 	}

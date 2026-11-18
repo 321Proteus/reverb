@@ -35,7 +35,9 @@ qstring val_str(
 			s.sprnt("var%d%+lld", v.loc.var, (long long)v.loc.off);
 		break;
 
-	default: s = "<runtime value>"; break;
+	case val_t::STR: s.sprnt("\"%s\"", v.str.c_str()); break;
+
+	default:		 s = "<runtime value>"; break;
 	}
 
 	return s;
