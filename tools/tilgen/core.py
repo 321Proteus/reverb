@@ -32,6 +32,12 @@ class Abi:
     subst: tuple
     bits: int = 64               # the database must be this wide (see Session)
     dummy_cc: tuple = ()         # compilers that can make a database for it
+    compiler: str = "msvc"       # IDA compiler profile: "msvc" or "gnu"
+    cxx_prelude: str = ""        # prepended to every C++ probe
+
+    @property
+    def windows(self):
+        return self.compiler == "msvc"
 
 
 # Adding an ABI is a row (the database must match its width: see Session).
@@ -44,6 +50,17 @@ ABIS = {
                   (("__RV_API", "__stdcall"), ("__RV_THISCALL", "__thiscall"),
                    ("__RV_ITANIUM_ONLY", "//"), ("__RV_MAC_ONLY", "//")),
                   bits=32, dummy_cc=("i686-w64-mingw32-gcc",)),
+    # libstdc++ headers come from the host toolchain (host_includes); IDA's
+    # clang also adds the newest GCC it finds itself, so that must be the same
+    # one (check_gcc; tools/tilgen/run.sh pins it)
+    "itanium64": Abi("x86_64-linux-gnu", "Itanium x64 (Linux)",
+                     (("__RV_API", ""), ("__RV_THISCALL", ""),
+                      ("__RV_ITANIUM_ONLY", ""), ("__RV_MAC_ONLY", "//")),
+                     dummy_cc=("cc", "gcc", "clang"), compiler="gnu",
+                     # <string> declares the std::pmr aliases with
+                     # polymorphic_allocator incomplete; IDA turns every alias
+                     # into a type, which fails without this (dozens of errors)
+                     cxx_prelude="#include <memory_resource>\n"),
 }
 
 
@@ -53,7 +70,7 @@ def ensure_db(abi, root=OUT_ROOT.parent):
     detected by IDA as MSVC; its 32-bit one as GNU, which breaks msvc32: see
     use_compiler)."""
     d = Path(root) / "dummy"
-    exe = d / f"dummy_{abi}.exe"
+    exe = d / (f"dummy_{abi}" + (".exe" if ABIS[abi].windows else ""))
     if exe.exists():
         return exe
     cc = next((c for c in ABIS[abi].dummy_cc if shutil.which(c)), None)
@@ -89,17 +106,116 @@ def substitute(text, abi):
 # so -U wins.
 UNDEF = ("__unaligned", "__ptr32", "__ptr64", "__restrict")
 
+# The Windows headers only trip over the four above, and they need IDA's
+# _MSC_VER / _WIN32 / _stdcall definitions. glibc/libstdc++ use plain
+# identifiers IDA also defines (`__tuple`, `__off`, `__signed`...:
+# `-D__tuple=struct[[clang::annotate]]`), so for the other ABIs every such
+# keyword-like macro IDA predefines is removed. The list is the `-D__name=`
+# set found in libida.so (IDA 9.4).
+UNDEF_IDA_KEYWORDS = (
+    "__array_ptr", "__at", "__bin", "__bitmask", "__char", "__cppobj",
+    "__custom", "__dec", "__enum", "__export", "__far", "__fixed", "__float",
+    "__gc", "__hex", "__huge", "__import", "__invbits", "__invsign",
+    "__lzero", "__near", "__noreturn", "__objc_interface", "__oct", "__off",
+    "__offset", "__pure", "__return_ptr", "__sbin", "__segm", "__shex",
+    "__shifted", "__signed", "__soct", "__spoi", "__stroff", "__strlit",
+    "__struct_ptr", "__swiftasync", "__swiftasynccall", "__swiftself",
+    "__swiftthrows", "__tabform", "__tuple", "__udec", "__unused",
+    "__usercall", "__userpurge")
+
+
+def host_includes(cxx):
+    """The include dirs of the C++ compiler `cxx`, as it reports them."""
+    r = subprocess.run([cxx, "-E", "-x", "c++", "-v", "-"], input="",
+                       capture_output=True, text=True, check=True)
+    dirs, on = [], False
+    for line in r.stderr.splitlines():
+        if line.startswith("#include <...>"):
+            on = True
+        elif line.startswith("End of search list"):
+            break
+        elif on and line.startswith(" "):
+            dirs.append(os.path.normpath(line.strip()))
+    return dirs
+
+
+def gcc_major(cxx):
+    out = subprocess.run([cxx, "-dumpversion"], capture_output=True,
+                         text=True, check=True).stdout
+    return int(out.split(".")[0])
+
+
+def check_gcc(cxx):
+    """IDA's clang adds the libstdc++ of the newest GCC under /usr/lib/gcc by
+    itself, whatever the flags (-nostdinc++, --gcc-toolchain, --sysroot are
+    ignored). Mixed with another GCC's headers, and with GCC 16's on its own,
+    JUCE 6.1+ crashes the parser. So the newest one there must be `cxx`'s.
+    -> a toolchain string for the manifest."""
+    want = gcc_major(cxx)
+    found = []
+    for d in Path("/usr/lib/gcc").glob("*linux*/*"):    # not mingw's
+        if (d / "crtbegin.o").exists():
+            m = re.match(r"\d+", d.name)
+            if m:
+                found.append(int(m[0]))
+    if found and max(found) != want:
+        raise SystemExit(
+            f"{cxx} is GCC {want}, but IDA's clang will also pull in GCC "
+            f"{max(found)}'s headers from /usr/lib/gcc: run through "
+            f"tools/tilgen/run.sh (host mode hides the others)")
+    full = subprocess.run([cxx, "-dumpfullversion"], capture_output=True,
+                          text=True).stdout.strip()
+    return f"GCC {full or want}"
+
+
 def system_includes(abi, xwin, extra=()):
-    """The platform headers for `abi`: the xwin splat, then any --sys-include."""
+    """The platform headers for `abi`: the xwin splat for Windows ABIs, then
+    any --sys-include (for the others main() fills these from --cxx)."""
+    if not ABIS[abi].windows:
+        return list(extra)
     x = str(xwin)
     return [f"{x}/crt/include", f"{x}/sdk/include/ucrt",
             f"{x}/sdk/include/um", f"{x}/sdk/include/shared"] + list(extra)
 
 
+# IDA passes only an allowlist of clang options (-x -std= -D -U -I -F -target
+# -isysroot -fsyntax-only -fno-rtti ...; see cfg/idaclang.cfg) and silently
+# drops the rest. These are the ones parser_args adds beyond it. Without
+# -skip-function-bodies, templates instantiated in inline bodies become types
+# too, and one whose name holds a lambda (libstdc++'s std::thread::_Invoker,
+# std::variant's visit tables) makes IDA drop every type of the main file.
+PERMITTED_OPTIONS = "-Xclang -skip-function-bodies -frtti"
+
+
+# idaclang.cfg's logging switches (CLANG_LOG_<name>), for --clang-log
+CLANG_LOGS = ("WARNINGS", "AST", "MACROS", "PREDEFINED", "UDTS", "FILES",
+              "ARGV", "TARGET_INFO")
+
+
+def parser_idausr(root=OUT_ROOT.parent, logs=()):
+    """An IDA user dir holding only an idaclang.cfg that permits
+    PERMITTED_OPTIONS (set_parser_option cannot change it) and turns on the
+    CLANG_LOG_* switches in `logs`. It is appended to IDAUSR, so the user's
+    own settings, registry and license stay in effect. One file for all
+    builds: runs with different `logs` at the same time overwrite each
+    other's."""
+    d = Path(root) / "tilgen-idausr"
+    cfg = d / "cfg" / "idaclang.cfg"
+    text = f'CLANG_ARGV_PERMITTED_OPTIONS = "{PERMITTED_OPTIONS}";\n'
+    text += "".join(f"CLANG_LOG_{n} = YES\n" for n in logs)
+    if not cfg.exists() or cfg.read_text() != text:
+        # atomically: parallel children may be reading it
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cfg.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(text)
+        tmp.replace(cfg)
+    return d
+
+
 def parser_args(abi, lang, includes, defines=()):
     """The argument string for set_parser_argv. lang: 'c++17', 'c11', ...
     Only -I: IDA drops -isystem and treats its path as a second input file
-    (quirk 1). -frtti is overridden by IDA anyway (quirk 3)."""
+    (quirk 1). Options outside IDA's allowlist need PERMITTED_OPTIONS."""
     kind = "c" if lang.startswith("c") and not lang.startswith("c++") \
         else "c++"
     args = [f"-x {kind} -std={lang}", f"-target {ABIS[abi].triple}", "-Xclang -skip-function-bodies"]
@@ -111,7 +227,8 @@ def parser_args(abi, lang, includes, defines=()):
         # (quirk 11); <stdbool.h> then maps bool back to the builtin _Bool
         args.append("-U_Bool")
     args += [f"-D{d}" for d in defines]
-    args += [f"-U{u}" for u in UNDEF]
+    undef = UNDEF if ABIS[abi].windows else UNDEF + UNDEF_IDA_KEYWORDS
+    args += [f"-U{u}" for u in undef]
     args += [f"-I{i}" for i in includes]
     return " ".join(args)
 
@@ -127,15 +244,24 @@ MSVC_MACROS = (
     "_Windows=1;__WIN32__=1;_WIN32_WINNT=0x0500;WINVER=0x0500;_WIN32=1;"
     "OLEDBVER=0x0250;SECURITY_WIN32;WIN32_SUPPORT;DBNTWIN32;W32SUT_32;")
 
+# IDA 9.4's GNU profile (what a database of an ELF executable has)
+GNU_HEADER_PATH = "/usr/local/include:/usr/include"
+GNU_MACROS = ("__GNUC__=4;__CHAR_BIT__=8;unix=1;__unix=1;__unix__=1;"
+              "__ELF__=1;")
+
 
 class Session:
     """One idalib database, for any number of sequential builds."""
 
-    def __init__(self, db, log_path):
+    def __init__(self, db, log_path, clang_logs=()):
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.write_text("")
         os.environ["IDALOG"] = str(self.log_path)  # before the import
+        usr = str(parser_idausr(logs=clang_logs))
+        base = os.environ.get("IDAUSR") or str(Path.home() / ".idapro")
+        if usr not in base.split(os.pathsep):
+            os.environ["IDAUSR"] = base + os.pathsep + usr
         import idapro
         import ida_srclang
         import ida_typeinf
@@ -144,6 +270,20 @@ class Session:
             raise RuntimeError(f"cannot open {db}")
         import ida_ida
         self.db_bits = 64 if ida_ida.inf_is_64bit() else 32
+        self.check_permitted()
+
+    def check_permitted(self):
+        """A body with an error must parse cleanly, or IDA dropped
+        -skip-function-bodies (parser_idausr's cfg was not loaded)."""
+        til = self.ti.new_til("permitted_check.til", "check")
+        self.sl.set_parser_argv("clang", "-x c++ " + PERMITTED_OPTIONS)
+        errs = self.sl.parse_decls_with_parser(
+            "clang", til, "struct S { void f() { undeclared_name; } };", False)
+        if errs:
+            raise SystemExit(
+                "IDA ignores -skip-function-bodies: the idaclang.cfg in "
+                f"{parser_idausr()} was not loaded (IDAUSR="
+                f"{os.environ.get('IDAUSR')})")
 
     def use_compiler(self, abi):
         """Windows ABIs parse with IDA's MSVC profile whatever it detected in
@@ -151,14 +291,20 @@ class Session:
         then carries the GNU profile: host /usr/include and `__GNUC__`, which
         pull glibc in. The compiler id alone does not change that, so the
         header path and macros are set to the MSVC profile (as IDA's own for
-        a database detected as MSVC) too."""
+        a database detected as MSVC) too. GNU ABIs get IDA's GNU profile
+        the same way."""
         import ida_ida
-        ida_ida.inf_set_cc_id(self.ti.COMP_MS)
-        if ida_ida.inf_get_cc_id() != self.ti.COMP_MS:
-            raise SystemExit("cannot select the MSVC compiler")
-        if self.ti.get_c_macros() != MSVC_MACROS:
-            self.ti.set_c_header_path(MSVC_HEADER_PATH)
-            self.ti.set_c_macros(MSVC_MACROS)
+        if ABIS[abi].windows:
+            cc, path, macros = self.ti.COMP_MS, MSVC_HEADER_PATH, MSVC_MACROS
+        else:
+            cc, path, macros = self.ti.COMP_GNU, GNU_HEADER_PATH, GNU_MACROS
+        ida_ida.inf_set_cc_id(cc)
+        if ida_ida.inf_get_cc_id() != cc:
+            raise SystemExit(f"cannot select the {ABIS[abi].compiler} "
+                             "compiler")
+        if self.ti.get_c_macros() != macros:
+            self.ti.set_c_header_path(path)
+            self.ti.set_c_macros(macros)
 
     def require_bits(self, abi):
         """-target only changes the builtin typedefs: IDA lays classes out
@@ -364,7 +510,8 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None,
         errs_total, msgs = 0, []
         for i, (u, lang) in enumerate(zip(plan.units, attempt)):
             probe = plan.workdir / f"probe{i}.h"
-            probe.write_text(u.probe)
+            cxx = lang.startswith("c++")
+            probe.write_text((ABIS[abi].cxx_prelude if cxx else "") + u.probe)
             args = parser_args(abi, lang, plan.includes, u.defines)
             errs, text = sess.parse(til, args, probe)
             errs_total += errs

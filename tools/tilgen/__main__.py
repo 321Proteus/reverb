@@ -106,13 +106,37 @@ def main():
     )
 
     ap.add_argument(
+        "--cxx",
+        default="g++",
+        help="GNU ABIs: the C++ compiler whose libstdc++ and system headers "
+        "are parsed (its include dirs become the --sys-include default); it "
+        "must be the newest GCC on the system, see tools/tilgen/run.sh"
+    )
+
+    ap.add_argument(
         "--out",
         default=str(core.OUT_ROOT)
     )
 
+    ap.add_argument(
+        "--clang-log",
+        help="comma list of IDA clang parser logs to turn on, into each "
+        "til's log: " + ",".join(core.CLANG_LOGS)
+    )
+
     a = ap.parse_args()
+    a.clang_logs = tuple(a.clang_log.upper().split(",")) if a.clang_log else ()
+    bad_logs = set(a.clang_logs) - set(core.CLANG_LOGS)
+    if bad_logs:
+        ap.error(f"unknown --clang-log {sorted(bad_logs)}")
     out = Path(a.out)
     sources = []
+
+    a.toolchain = None
+    if not core.ABIS[a.abi].windows:
+        a.toolchain = core.check_gcc(a.cxx)
+        if not a.sys_include:
+            a.sys_include = core.host_includes(a.cxx)
 
     if a.source in ("formats", "all"):
         sources.append(Formats(a.sdks, a.xwin, a.vst3, a.sys_include))
@@ -126,7 +150,7 @@ def main():
     if not a.inprocess:
         sys.exit(run_children(a, sources, out, log))
 
-    sess = core.Session(a.db, a.log or out / "tilgen.log")
+    sess = core.Session(a.db, a.log or out / "tilgen.log", a.clang_logs)
     sess.require_bits(a.abi)
     sess.use_compiler(a.abi)
 
@@ -147,6 +171,8 @@ def main():
                                     src.title(lab, a.abi), a.full)
                 finally:
                     shutil.rmtree(plan.workdir, ignore_errors=True)
+                if a.toolchain:
+                    e["toolchain"] = a.toolchain
 
                 log(f"  {e['status']}: {e['types']} types, {e['errors']} errors "
                     f"({e['errors_outside_rtti']} not rtti), "
@@ -213,6 +239,7 @@ def run_children(a, sources, out, log):
             cmd = [sys.executable, "-m", "tilgen", "--db", str(db),
                    "--source", src.name, "--refs", ver, "--abi", a.abi,
                    "--sdks", a.sdks, "--xwin", a.xwin, "--out", str(out),
+                   "--cxx", a.cxx,
                    "--inprocess", "--entry-out", str(entry),
                    "--log", str(logf)]
             if a.vst3:
@@ -221,6 +248,8 @@ def run_children(a, sources, out, log):
                 cmd += ["--only", a.only]
             if a.full:
                 cmd += ["--full"]
+            if a.clang_log:
+                cmd += ["--clang-log", a.clang_log]
             for d in a.sys_include:
                 cmd += ["--sys-include", d]
 
@@ -236,6 +265,8 @@ def run_children(a, sources, out, log):
                 e = {"source": src.name, "version": lab, "abi": a.abi,
                      "status": what, "returncode": rc, "types": 0,
                      "errors": 0, "bytes": 0}
+                if a.toolchain:
+                    e["toolchain"] = a.toolchain
             else:
                 e = json.loads(entry.read_text()) if entry.exists() else None
             with lock:

@@ -59,6 +59,12 @@ DEFINES = {
 }
 
 
+# Off outside Windows: on Linux they pull GTK/WebKit and curl headers into the
+# GUI module, and the wrapper classes do not depend on them. Windows tils keep
+# JUCE's defaults (what they were built and checked with).
+NON_WINDOWS_DEFINES = {"JUCE_WEB_BROWSER": "0", "JUCE_USE_CURL": "0"}
+
+
 def workarounds(fmt, v):
     """Per-version extra defines of a wrapper TU. The 5.4.0-6.0.x VST3
     wrapper exports GetPluginFactory with __FUNCTION__ / __FUNCDNAME__,
@@ -113,10 +119,13 @@ def anchors_for(v, abi, only=()):
     anchors = [Anchor(("juce::JucePluginFactory", "JucePluginFactory"), size,
                       fac),
                Anchor(("juce::JuceVSTWrapper", "JuceVSTWrapper"), None, wrap)]
-    if only:    # only the wrappers that are being parsed
-        keep = {"vst3": 0, "vst2": 1}
-        anchors = [anchors[keep[f]] for f in only]
-    return anchors
+    fmts = only or ("vst3", "vst2")
+    if not ABIS[abi].windows and v < (6, 0, 0):
+        # 5.x builds its VST3 wrapper on Apple and Windows only (the file is
+        # #if'ed out elsewhere): no factory to assert
+        fmts = tuple(f for f in fmts if f != "vst3")
+    keep = {"vst3": 0, "vst2": 1}
+    return [anchors[keep[f]] for f in fmts]
 
 
 # Names of what JUCE's own sources and its bundled SDKs define (the rest of a
@@ -184,6 +193,8 @@ class Juce:
                 notes.append(f"no {fmt} wrapper found")
                 continue
             d = {**DEFINES, **workarounds(fmt, v)}
+            if not ABIS[abi].windows:
+                d.update(NON_WINDOWS_DEFINES)
             text = "".join(f"#define {k} {val}\n" for k, val in d.items())
             if fmt == "vst2":
                 # The wrapper includes Steinberg's aeffect.h inside
