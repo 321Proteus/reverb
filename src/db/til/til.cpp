@@ -9,6 +9,7 @@
 #include <diskio.hpp>
 #include <dirtree.hpp>
 #include <ida.hpp>
+#include <kernwin.hpp>
 #include <loader.hpp>
 #include <set>
 #include <string>
@@ -163,12 +164,12 @@ bool load(const Request& req) {
 
 		if (reported.insert(req.name).second) {
 
-			rv_log("%s type libraries (rv_%s%s_%s.til) are not installed. "
-				   "Download the type library archive from "
-				   "the releases page and extract it to one of the following "
-				   "locations:\n%s No restart is needed",
+			warning("%s type libraries (rv_%s%s_%s.til) are not installed.\n\n"
+					"Download the type library archive from the releases page "
+					"and extract it to one of the following locations:\n%s\n\n"
+					"No restart is needed",
 				req.label, req.name, req.version != nullptr ? "_v*" : "", abi,
-				searched.c_str(), get_user_idadir());
+				searched.c_str());
 		}
 
 		return false;
