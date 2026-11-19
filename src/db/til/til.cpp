@@ -67,7 +67,7 @@ static std::vector<TilEntry> search_tils(
 
 	char answer[QMAXPATH];
 	for (const qstring& d : dirs) {
-		if (!searched->empty()) *searched += ", ";
+		if (!searched->empty()) *searched += '\n';
 		*searched += d;
 		enumerate_files(answer, sizeof(answer), d.c_str(), pattern.c_str(), sc);
 	}
@@ -122,10 +122,9 @@ static void import_types(til_t* src, const char* label, const char* folder) {
 	const size_t grouped =
 		group_local_types(first, get_ordinal_limit(local), folder);
 
-	rv_log("%s types: %u imported into local types in %u ms, %u failed", label,
-		unsigned(get_ordinal_count(local) - before),
-		unsigned((get_nsec_stamp() - t0) / 1000000), unsigned(failed),
-		unsigned(grouped), folder);
+	rv_log("%s types: %u imported into local types (%s) in %u ms, %u failed",
+		label, unsigned(get_ordinal_count(local) - before), folder,
+		unsigned((get_nsec_stamp() - t0) / 1000000), unsigned(failed));
 }
 
 bool load(const Request& req) {
@@ -151,10 +150,11 @@ bool load(const Request& req) {
 		static std::set<std::string> reported;
 
 		if (reported.insert(req.name).second) {
+
 			rv_log("%s type libraries (rv_%s%s_%s.til) are not installed. "
 				   "Download the type library archive from "
-				   "the releases page and extract it to %s, no restart is "
-				   "needed",
+				   "the releases page and extract it to one of the following "
+				   "locations:\n%s No restart is needed",
 				req.label, req.name, req.version != nullptr ? "_v*" : "", abi,
 				searched.c_str(), get_user_idadir());
 		}

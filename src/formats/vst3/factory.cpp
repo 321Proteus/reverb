@@ -273,7 +273,7 @@ void find_class_infos(
 		qstring category;
 		auto c = h.fields.find("category");
 
-		if (str_field(h, "category", category) && !category.empty()) {
+		if (!str_field(h, "category", category) || category.empty()) {
 			rv_log("  -> rejected: category is not a constant string");
 			continue;
 		}
@@ -342,58 +342,108 @@ void lower_factory_info(
 	}
 }
 
+// The category strings are fixed SDK constants
+constexpr const char* KNOWN_CATEGORIES[] = {
+	"Audio Module Class",
+	"Component Controller Class",
+	"Test Class",
+};
+
+bool is_known_category(const call_arg_t& a) {
+	qstring s;
+	if (a.k == call_arg_t::STR) s = a.str;
+	else if (a.k == call_arg_t::OBJ) {
+		if (!read_utf8(a.ea, s)) return false;
+	} else
+		return false;
+
+	for (const char* k : KNOWN_CATEGORIES)
+		if (s == k) return true;
+	return false;
+}
+
 // PClassInfo2 ctor: (this, cid, cardinality, category, name, classFlags,
-// subCategories, vendor, version, sdkVersion). Anchored on kManyInstances.
+// subCategories, vendor, version, sdkVersion). Anchored on a known category
+// string, or on kManyInstances. A category anchor implies the cardinality, as
+// it may be a non-constant argument
 void lower_class_info(factory_collector_t& col, const call_t& c,
 	const layout_t& cls, const uint32 (*uid)[4], bool com) {
 	const std::vector<call_arg_t>& A = c.args;
 	const size_t n = cls.fields.size();
 
-	size_t card = 0; // position of cardinality in the layout
+	size_t card = 0, cat = 0; // positions in the layout
 	while (card < n && cls.fields[card].name != "cardinality")
 		card++;
-	if (card == n) return;
+	while (cat < n && cls.fields[cat].name != "category")
+		cat++;
+	if (card == n || cat == n) return;
 
-	for (size_t j = card + 1; j < A.size(); j++) {
-		if (A[j].k != call_arg_t::NUM || uint32(A[j].num) != MANY_INSTANCES)
-			continue;
+	size_t first = A.size(); // argument holding cid
+	bool by_category = false;
 
-		const size_t first = j - card; // argument holding cid
-		if (first + n > A.size()) return;
-
-		const call_arg_t& self = A[first - 1];
-		loc_t base;
-		if (self.k == call_arg_t::OBJ)
-			base = loc_t{ GLOBAL_ROOT, int64(self.ea) };
-		else if (self.k == call_arg_t::VAR)
-			base = loc_t{ self.var, 0 };
-		else
-			return;
-
-		for (size_t i = 0; i < n; i++) {
-			const field_desc_t& f = cls.fields[i];
-			const call_arg_t& a = A[first + i];
-			const loc_t at{ base.var, base.off + f.off };
-
-			if (f.name == "cid") {
-				uchar raw[16] = {};
-				if (a.k == call_arg_t::OBJ) {
-					if (get_bytes(raw, 16, a.ea) != 16) continue;
-				} else if (a.k == call_arg_t::VAR && uid != nullptr)
-					tuid_from_longs(*uid, com, raw);
-				else
-					continue;
-				col.stores.push_back(raw_store(at, raw, 16, c.ea));
-			} else if (f.kind == F_INT && a.k == call_arg_t::NUM)
-				col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
-			else if (f.kind == F_STR && a.k == call_arg_t::OBJ)
-				col.copies.push_back(copy_of(at, a.ea, c.ea));
-			else if (f.kind == F_STR && a.k == call_arg_t::STR)
-				rv_log("    %s at %a is a cot_str with no address",
-					f.name.c_str(), c.ea);
-			// NUM 0 for a string is a NULL pointer: leave the field unwritten
+	for (size_t j = cat; j < A.size() && first == A.size(); j++)
+		if (is_known_category(A[j])) {
+			first = j - cat;
+			by_category = true;
 		}
+
+	if (first == A.size())
+		for (size_t j = card + 1; j < A.size(); j++)
+			if (A[j].k == call_arg_t::NUM &&
+				uint32(A[j].num) == MANY_INSTANCES) {
+				first = j - card;
+				break;
+			}
+
+	if (first == A.size() || first == 0 || first + n > A.size()) return;
+
+	const call_arg_t& self = A[first - 1];
+	loc_t base;
+	if (self.k == call_arg_t::OBJ) base = loc_t{ GLOBAL_ROOT, int64(self.ea) };
+	else if (self.k == call_arg_t::VAR)
+		base = loc_t{ self.var, 0 };
+	else
 		return;
+
+	for (size_t i = 0; i < n; i++) {
+		const field_desc_t& f = cls.fields[i];
+		const call_arg_t& a = A[first + i];
+		const loc_t at{ base.var, base.off + f.off };
+
+		if (f.name == "cid") {
+			uchar raw[16] = {};
+
+			if (a.k == call_arg_t::OBJ) {
+				if (get_bytes(raw, 16, a.ea) != 16) continue;
+
+			} else if (a.k == call_arg_t::VAR && uid != nullptr)
+				tuid_from_longs(*uid, com, raw);
+			else
+				continue;
+
+			col.stores.push_back(raw_store(at, raw, 16, c.ea));
+
+		} else if (f.name == "cardinality") {
+			if (a.k == call_arg_t::NUM)
+				col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
+			else if (by_category)
+				col.stores.push_back(num_store(at, f.sz, MANY_INSTANCES, c.ea));
+
+		} else if (f.kind == F_INT && a.k == call_arg_t::NUM)
+			col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
+
+		else if (f.kind == F_STR && a.k == call_arg_t::OBJ)
+			col.copies.push_back(copy_of(at, a.ea, c.ea));
+
+		else if (f.kind == F_STR && a.k == call_arg_t::STR) {
+			store_t s;
+			s.loc = at;
+			s.ea = c.ea;
+			s.val.t = val_t::STR;
+			s.val.str = a.str;
+			s.size = int(a.str.length()) + 1;
+			col.stores.push_back(std::move(s));
+		}
 	}
 }
 

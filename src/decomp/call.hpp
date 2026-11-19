@@ -13,6 +13,7 @@ struct call_arg_t {
 	ea_t ea = BADADDR; // for OBJ: the global's address
 	int var = -1;	   // for VAR: lvar index
 	bool ref = false;  // is it a &x
+	qstring str;	   // for STR: the literal text
 };
 
 struct call_t {
@@ -51,6 +52,7 @@ inline call_arg_t read_call_arg(cexpr_t* a) {
 	case cot_str:
 		// text only, no address
 		r.k = call_arg_t::STR;
+		if (a->string != nullptr) r.str = a->string;
 		break;
 
 	default: break;
