@@ -5,6 +5,7 @@ Without --db a dummy executable is built into build/dummy/."""
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -114,6 +115,13 @@ def main():
     )
 
     ap.add_argument(
+        "--no-quarantine",
+        action="store_true",
+        help="children run without tilgen/holdfree.c preloaded (it delays "
+        "free(), which keeps IDA's parser from crashing on JUCE 7.0.6+)"
+    )
+
+    ap.add_argument(
         "--out",
         default=str(core.OUT_ROOT)
     )
@@ -215,6 +223,10 @@ def run_children(a, sources, out, log):
     crash in the manifest and goes on. Only the parent writes the manifest."""
     lock = threading.Lock()
     state = {"entries": core.load_manifest(out), "bad": 0}
+    env = dict(os.environ)
+    if not a.no_quarantine:
+        pre = env.get("LD_PRELOAD")
+        env["LD_PRELOAD"] = str(core.holdfree()) + (f":{pre}" if pre else "")
     jobs = []
 
     for src in sources:
@@ -254,7 +266,7 @@ def run_children(a, sources, out, log):
                 cmd += ["--sys-include", d]
 
             p = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=env)
             rc = p.returncode
             lines = p.stdout.splitlines()
             if rc not in (0, 1):    # 1: ran, anchors failed (in the output)

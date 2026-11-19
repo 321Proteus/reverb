@@ -212,6 +212,27 @@ def parser_idausr(root=OUT_ROOT.parent, logs=()):
     return d
 
 
+HOLDFREE_SRC = Path(__file__).with_name("holdfree.c")
+
+
+def holdfree(root=OUT_ROOT.parent, cc="cc"):
+    """holdfree.c built into build/tilgen-holdfree/ (rebuilt when the
+    source is newer): the LD_PRELOAD that keeps IDA 9.4's parser from
+    crashing on a container it walks while adding to it (JUCE 7.0.6+ on
+    libstdc++; see the source)."""
+    # per glibc: run.sh host and run.sh docker share build/
+    libc = os.confstr("CS_GNU_LIBC_VERSION").replace(" ", "-")
+    so = Path(root) / "tilgen-holdfree" / f"holdfree-{libc}.so"
+    if so.exists() and so.stat().st_mtime >= HOLDFREE_SRC.stat().st_mtime:
+        return so
+    so.parent.mkdir(parents=True, exist_ok=True)
+    tmp = so.with_suffix(f".{os.getpid()}.tmp")
+    subprocess.run([cc, "-O2", "-shared", "-fPIC", "-o", str(tmp),
+                    str(HOLDFREE_SRC), "-lpthread"], check=True)
+    tmp.replace(so)
+    return so
+
+
 def parser_args(abi, lang, includes, defines=()):
     """The argument string for set_parser_argv. lang: 'c++17', 'c11', ...
     Only -I: IDA drops -isystem and treats its path as a second input file
