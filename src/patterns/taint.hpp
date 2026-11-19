@@ -7,9 +7,6 @@
 
 namespace rv::taint {
 
-// The type name without typedefs and namespaces
-qstring short_type_name(const tinfo_t& t);
-
 // Strip every pointer and array level
 tinfo_t innermost(tinfo_t t);
 

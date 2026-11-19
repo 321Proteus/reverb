@@ -2,6 +2,7 @@
 
 #include "db/refs.hpp"
 #include <pro.h>
+#include <typeinf.hpp>
 #include <vector>
 
 // MSVC and Itanium RTTI, both directions. No Hex-Rays.
@@ -42,6 +43,9 @@ qvector<qstring> bases_at(const class_info& cls, sval_t off);
 
 // Last "::" component
 qstring short_name(const qstring& name);
+
+// Same, for a type. Typedefs resolved where possible, then last "::" component
+qstring short_name(const tinfo_t& t);
 
 // Typeinfo / TypeDescriptor whose name string contains str or BADADDR
 ea_t find_typeinfo(const ref_index& refs, ea_t str);
