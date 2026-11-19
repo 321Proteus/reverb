@@ -9,9 +9,9 @@ Audio plugins are shared objects, mostly written in C and C++ (although Rust and
 
 ## Features
  - **Plugin interface detection** from the exported symbols
- - **Type declarations** from the official SDKs
  - **Object labeling** Entry points, factory objects, vtables, plugin descriptors, you name it.
  - **Plugin framework identification** from strings and RTTI signatures for JUCE, DPF and iPlug2
+ - **Type declarations** from the official SDKs and the JUCE plugin framework
 
 ## Requirements
 
@@ -21,13 +21,13 @@ Audio plugins are shared objects, mostly written in C and C++ (although Rust and
 
 A few additional tools are required:
 - IDA SDK for your preferred IDA version:
-    - **SDK 9.4 and newer** ships its own CMake layout (`cmake/idasdk_init.cmake`), and
-    REverb uses it.
+    - **SDK 9.4 and newer** ships its own CMake layout (`cmake/idasdk_init.cmake`), and  REverb uses it.
     - **Older SDKs** need [`allthingsida/ida-cmake`](https://github.com/allthingsida/ida-cmake)
     cloned into the SDK root as `ida-cmake/`; REverb looks for `ida-cmake/bootstrap.cmake`.
 - CMake 3.25 or higher
 - A modern C++ compiler for your platform
 - Recent Python and pip (for decl generation and tests)
+- Docker (for TIL generation)
 - Clang 21 or higher for clang-format
 
 ```sh
@@ -59,6 +59,7 @@ The name "test" is misleading here, because it doesn't actually check anything, 
 my plugin library. It also requires a licensed IDA and therefore is not ran by CI.
 
 ## To Do (planned):
+ - Figure out how to do type declarations for other frameworks, like DPF and iPlug2 - they don't have typical release cycles, just a steady stream of commits
  - Create a minimal plugin host that uses format and framework detection results to automatically set breakpoints
  at interesting functions and integrate it with the IDA debug ecosystem
  - Recursively taint functions accessing pointers to audio signal data provided by the host (e.g. `process()` in VST3),
@@ -69,8 +70,7 @@ my plugin library. It also requires a licensed IDA and therefore is not ran by C
 
 ### Regenerating the type declarations
 
-The SDK type declarations REverb loads into IDA are generated resources from each applicable `src/formats`' `types.h` and matching `.inc` tables (such as `iids.inc` in VST3). The plugin build only embeds them, so you only need this when an
-SDK is updated.
+REverb uses two kinds of type declarations. Format types are served as IDA type library modules or generated resources from each applicable `src/formats`' `types.h` and matching `.inc` tables (such as `iids.inc` in VST3). The framework declarations are only distributed using TIL libraries.
 
 ```sh
 pip install libclang
@@ -88,10 +88,21 @@ python3 tools/clap_decls.py --sdk clap \
     --exts src/formats/clap/exts.inc
 
 cmake -B build -S .  # reconfigure to embed the new files
+
+# Format & framework TIL, running in a Docker container
+cd tools/tilgen
+# Set up the environment variables listed in run.sh
+
+./run.sh docker \
+    --abi itanium64 \ # or msvc32, msvc64
+    --source all \ # or formats, juce
+    -j 4 # or more for parallel processing
 ```
 
 Each generator re-parses its own output for every target ABI and compares struct sizes, field offsets and (for CLAP) field types and enum constants against the source headers.
 VST2 type declarations are not generated - please read the note in `src/formats/vst2/types.h`.
+
+Note: for unknown reasons, the IDA parser crashes on some JUCE release tags (7.0.3 on MSVC64, 7.0.5 through 8.0.10 on IA64), specifically on the VST3 module. Until the cause is found and solved, those tags will only contain VST2 types.
 
 ## Contributing
 
