@@ -1,6 +1,7 @@
 #include "taint.hpp"
 #include "core/log.hpp"
 #include "decomp/analysis.hpp"
+#include "cxx/rtti/abi.hpp"
 #include "formats/format.hpp"
 #include <algorithm>
 #include <cstring>
@@ -16,7 +17,7 @@ static bool is_primitive(const char* name) {
 static bool type_is(const tinfo_t& t, const char* name) {
 	if (!strcmp(name, "float")) return t.is_float();
 	if (!strcmp(name, "double")) return t.is_double();
-	return short_type_name(t) == name;
+	return rtti::short_name(t) == name;
 }
 
 // t is owner or has it among its (transitive) base classes

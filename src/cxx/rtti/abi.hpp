@@ -10,6 +10,7 @@
 
 #include "db/refs.hpp"
 #include <pro.h>
+#include <typeinf.hpp>
 #include <vector>
 
 namespace rv::rtti {
@@ -67,6 +68,14 @@ qvector<qstring> bases_at(const class_info& cls, sval_t off);
  * @brief The last top-level `::` component (template arguments are skipped)
  */
 qstring short_name(const qstring& name);
+
+/**
+ * @brief Gets the unqualified type name
+ *
+ * @param t the type to process
+ * @return qstring the name segment after the last `::`
+ */
+qstring short_name(const tinfo_t& t);
 
 /**
  * @brief Find the typeinfo / TypeDescriptor whose name string contains @p str.

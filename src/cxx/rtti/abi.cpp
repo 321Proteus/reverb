@@ -27,6 +27,12 @@ qstring short_name(const qstring& name) {
 	return name.substr(start);
 }
 
+qstring short_name(const tinfo_t& t) {
+	qstring n;
+	if (!t.get_final_type_name(&n)) t.get_type_name(&n);
+	return short_name(n);
+}
+
 bool parse_rtti(ea_t vt, class_info* out) {
 	if (vt == BADADDR || !is_loaded(vt - 2 * ptr_size())) return false;
 
