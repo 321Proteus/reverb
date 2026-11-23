@@ -51,18 +51,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
 
-      - name: Download IDA SDK ${{ matrix.ida }}
+      - name: Fetch IDA SDK ${{ matrix.ida }}
         shell: bash
-        env:
-          HCLI_API_KEY: ${{ secrets.HCLI_API_KEY }}
         run: |
-          v="${{ matrix.ida }}"
-          uvx --from ida-hcli hcli --disable-updates \
-            download "release/${v}/sdk-and-utilities/idasdk${v//./}.zip"
-          unzip -q idasdk*.zip -d ./ida-temp/
+          git clone --depth 1 --branch "v${{ matrix.ida }}.0-release" \
+            https://github.com/HexRaysSA/ida-sdk ./ida-temp
           pro_h="$(find ida-temp -path '*/include/pro.h' | head -n1)"
           test -n "$pro_h" || { echo "pro.h not found in SDK"; exit 1; }
           mv "$(dirname "$(dirname "$pro_h")")" ./ida-sdk
@@ -111,6 +105,24 @@ jobs:
           name: reverb-ida${{ matrix.ida }}-${{ matrix.os.name }}
           path: artifacts/*
           if-no-files-found: error
+
+  # The one check the main branch ruleset requires: the matrix jobs' names
+  # follow ida-plugin.json, so requiring them would need the ruleset edited
+  # whenever an IDA version is added or dropped. always(): a skipped job
+  # counts as passed, so this must run (and fail) when the build did not.
+  build-ok:
+    name: build-ok
+    if: always()
+    needs: [versions, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the build matrix
+        env:
+          VERSIONS: ${{ needs.versions.result }}
+          BUILD: ${{ needs.build.result }}
+        run: |
+          echo "versions: $VERSIONS, build: $BUILD"
+          [ "$VERSIONS" = success ] && [ "$BUILD" = success ]
 
   package:
     if: startsWith(github.ref, 'refs/tags/v')
