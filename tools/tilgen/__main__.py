@@ -115,6 +115,13 @@ def main():
     )
 
     ap.add_argument(
+        "--raw",
+        action="store_true",
+        help="store tils without IDA's zlib (TIL_ZIP): ~8x larger, but an "
+        "archive of all versions then compresses across them"
+    )
+
+    ap.add_argument(
         "--no-quarantine",
         action="store_true",
         help="children run without tilgen/holdfree.c preloaded (it delays "
@@ -158,7 +165,8 @@ def main():
     if not a.inprocess:
         sys.exit(run_children(a, sources, out, log))
 
-    sess = core.Session(a.db, a.log or out / "tilgen.log", a.clang_logs)
+    sess = core.Session(a.db, a.log or out / "tilgen.log", a.clang_logs,
+                        zip_tils=not a.raw)
     sess.require_bits(a.abi)
     sess.use_compiler(a.abi)
 
@@ -260,6 +268,8 @@ def run_children(a, sources, out, log):
                 cmd += ["--only", a.only]
             if a.full:
                 cmd += ["--full"]
+            if a.raw:
+                cmd += ["--raw"]
             if a.clang_log:
                 cmd += ["--clang-log", a.clang_log]
             for d in a.sys_include:

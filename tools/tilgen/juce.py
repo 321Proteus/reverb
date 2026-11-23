@@ -5,11 +5,10 @@ together). Config only; ported by hand from the earlier juce-decls tool."""
 import re
 import subprocess
 import tarfile
-import tempfile
 import io
 from pathlib import Path
 
-from .core import ABIS, Anchor, Plan, Unit, system_includes
+from .core import ABIS, Anchor, Plan, Unit, system_includes, workdir
 
 TAG_RE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?(-security)?$")
 MINIMUM = (5, 0, 0)
@@ -177,7 +176,7 @@ class Juce:
 
     def plan(self, tag, abi):
         v = parse_tag(tag)
-        wd = Path(tempfile.mkdtemp(prefix="tilgen_juce_"))
+        wd = workdir(f"juce-{tag}-{abi}")
         self.extract(tag, wd)
         notes, units = [], []
         includes = [str(wd), str(wd / "modules")]

@@ -274,7 +274,8 @@ GNU_MACROS = ("__GNUC__=4;__CHAR_BIT__=8;unix=1;__unix=1;__unix__=1;"
 class Session:
     """One idalib database, for any number of sequential builds."""
 
-    def __init__(self, db, log_path, clang_logs=()):
+    def __init__(self, db, log_path, clang_logs=(), zip_tils=True):
+        self.zip_tils = zip_tils
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.write_text("")
@@ -356,6 +357,10 @@ class Session:
         """Compact and store. store_til(til, dir, name) writes elsewhere
         (quirk 6): pass the full path with no directory."""
         self.ti.compact_til(til)
+        if self.zip_tils:
+            til.flags |= self.ti.TIL_ZIP
+        else:
+            til.flags &= ~self.ti.TIL_ZIP
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         if not self.ti.store_til(til, None, str(path)):
             raise RuntimeError(f"store_til failed for {path}")
@@ -496,6 +501,18 @@ class Unit:
     defines: tuple = ()          # -D args
 
 
+def workdir(name):
+    """A fresh <tmp>/tilgen/<name>. The path is fixed, not mkdtemp's random
+    one: clang's names of unnamed types hold their source path (`lambda at
+    <path>:110:31`), so a random dir made every build of a til differ.
+    `name` must be unique among the builds that can run at once."""
+    import tempfile
+    d = Path(tempfile.gettempdir()) / "tilgen" / name
+    shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True)
+    return d
+
+
 @dataclass
 class Plan:
     """What a source needs built for one (version, abi): units parsed into
@@ -566,6 +583,7 @@ def build_one(sess, source, version, abi, plan, out_path, log, title=None,
         "types": sess.count(til), "errors": errs_total,
         "errors_outside_rtti": len(real),
         "bytes": os.path.getsize(out_path),
+        "zipped": sess.zip_tils,
         "std": "/".join(attempt),
         "status": "ok" if not problems else "anchor-fail",
         "problems": problems, "seconds": round(time.time() - t0, 1),

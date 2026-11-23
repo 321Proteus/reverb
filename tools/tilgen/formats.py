@@ -4,10 +4,10 @@ clap_..., VST2's own flat ones). Config only; the core does the work."""
 
 import glob
 import re
-import tempfile
 from pathlib import Path
 
-from .core import ABIS, REPO, Anchor, Plan, Unit, substitute, system_includes
+from .core import (ABIS, REPO, Anchor, Plan, Unit, substitute,
+                   system_includes, workdir)
 
 VST2_HEADER = REPO / "src" / "formats" / "vst2" / "types.h"
 
@@ -72,7 +72,7 @@ class Formats:
         return root / "formats" / f"rv_formats_{abi}.til"
 
     def plan(self, version, abi):
-        wd = Path(tempfile.mkdtemp(prefix="tilgen_fmt_"))
+        wd = workdir(f"formats-{abi}")
         inc = lambda hs: "".join(f'#include "{h}"\n' for h in hs)
         # The hand header is written for IDA's own C parser (`__hidden this`,
         # builtin bool and intptr_t), so it is parsed as C with these supplied
