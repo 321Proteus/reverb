@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 input= output= date=
 while [ $# -gt 0 ]; do
@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
         --date) date="${2:?}"; shift 2 ;;
         --date=*) date="${1#*=}"; shift ;;
         -h|--help) usage ;;
-        *) echo "packaging.sh: unknown argument $1" >&2; usage ;;
+        *) echo "package.sh: unknown argument $1" >&2; usage ;;
     esac
 done
 [ -n "$input" ] && [ -n "$output" ] || usage
@@ -74,7 +74,7 @@ unlisted = sorted(str(p.relative_to(src)) for p in src.rglob("*.til")
 if unlisted:
     fail.append("tils missing from the manifest:\n  " + "\n  ".join(unlisted))
 if fail:
-    sys.exit("packaging.sh: " + "\n".join(fail))
+    sys.exit("package.sh: " + "\n".join(fail))
 
 out.sort(key=lambda e: e["file"])
 (stage / "rv_tils_manifest.json").write_text(json.dumps(out, indent=1) + "\n")
