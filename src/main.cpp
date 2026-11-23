@@ -24,7 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
-#include "patterns/taint.hpp"
+#include "patterns/taint/taint.hpp"
 
 static bool format_til(bool import) {
 
