@@ -128,19 +128,16 @@ bool const_return(ea_t ea, uint64* out) {
 	return true;
 }
 
-ea_t direct_tail_callee(ea_t ea, bool* indirect) {
-	if (indirect != nullptr) *indirect = false;
-
-	cfuncptr_t cf = decompile_at(ea);
-	if (cf == nullptr || cf->body.op != cit_block) return BADADDR;
+cexpr_t* tail_call(cfunc_t* cf) {
+	if (cf == nullptr || cf->body.op != cit_block) return nullptr;
 
 	cblock_t* b = cf->body.cblock;
-	if (b->empty() || b->size() > 2) return BADADDR;
+	if (b->empty() || b->size() > 2) return nullptr;
 
 	cinsn_t& last = b->back();
 	if (b->size() == 2 &&
 		(last.op != cit_return || last.creturn->expr.op != cot_empty))
-		return BADADDR;
+		return nullptr;
 
 	cinsn_t& i = b->front();
 	cexpr_t* e = nullptr;
@@ -152,7 +149,15 @@ ea_t direct_tail_callee(ea_t ea, bool* indirect) {
 	}
 
 	e = strip_casts(e);
-	if (e == nullptr || e->op != cot_call) return BADADDR;
+	return e != nullptr && e->op == cot_call ? e : nullptr;
+}
+
+ea_t direct_tail_callee(ea_t ea, bool* indirect) {
+	if (indirect != nullptr) *indirect = false;
+
+	cfuncptr_t cf = decompile_at(ea);
+	cexpr_t* e = tail_call(cf);
+	if (e == nullptr) return BADADDR;
 
 	cexpr_t* fn = strip_casts(e->x);
 	if (fn->op != cot_obj || !is_code_addr(fn->obj_ea)) {

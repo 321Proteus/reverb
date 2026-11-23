@@ -42,12 +42,9 @@ struct embed_hint_t {
 	const char* type;
 };
 
-/*
-	Adds stores to globals, and the inlined strncpy8 calls.
-	A copy is kept with size 0 until a layout tells how wide its field is
-*/
+// Adds stores to globals
 struct factory_collector_t : public store_collector_t {
-	std::vector<store_t> copies;
+	std::set<ea_t> globals; // every global the function refers to
 
 	factory_collector_t(const cfunc_t* f) : store_collector_t(f) {}
 
@@ -69,56 +66,10 @@ struct factory_collector_t : public store_collector_t {
 		stores.push_back(std::move(s));
 	}
 
-	void add_copy(cexpr_t* e) {
-		store_t c;
-
-		cexpr_t* dst = strip_casts(e->y);
-		if (dst->op == cot_ref) dst = strip_casts(dst->x);
-
-		if (dst->op == cot_obj)
-			c.loc = loc_t{ GLOBAL_ROOT, int64(dst->obj_ea) };
-		else if (!fold_addr(e->y, &alias, c.loc))
-			return;
-
-		// Stays UNKNOWN for a string built at runtime
-		cexpr_t* src = strip_casts(e->x);
-		if (src->op == cot_ref) src = strip_casts(src->x);
-
-		if (src->op == cot_obj) {
-			c.val.t = val_t::ADDR;
-			c.val.ea = src->obj_ea;
-		}
-
-		c.ea = e->ea;
-		c.text = expr_str(e, cf);
-		copies.push_back(std::move(c));
-	}
-
 	int idaapi visit_expr(cexpr_t* e) override {
 
-		if (e->op == cot_call && e->x->op == cot_helper && e->a != nullptr &&
-			e->a->size() >= 2 && streq(e->x->helper, "strcpy")) {
+		if (e->op == cot_obj) globals.insert(e->obj_ea);
 
-			cexpr_t* src = strip_casts(&e->a->at(1));
-			loc_t at;
-
-			if (src->op == cot_str && fold_addr(&e->a->at(0), &alias, at)) {
-				store_t s;
-				s.loc = at;
-				s.ea = e->ea;
-				s.text = expr_str(e, cf);
-				s.val.t = val_t::STR;
-				s.val.str = src->string;
-				s.size = int(strlen(src->string)) + 1; // with the NUL
-				stores.push_back(std::move(s));
-			}
-
-			return 0;
-		}
-		if (e->op == cot_sub) {
-			add_copy(e);
-			return 0;
-		}
 		if (e->op == cot_asg) {
 			cexpr_t* lhs = strip_casts(e->x);
 			if (lhs->op == cot_obj) {
@@ -126,6 +77,7 @@ struct factory_collector_t : public store_collector_t {
 				return 0;
 			}
 		}
+
 		return store_collector_t::visit_expr(e);
 	}
 };
@@ -231,6 +183,8 @@ std::vector<store_t> stores_for(const factory_collector_t& col,
 qstring base_str(const factory_struct_t& h) {
 	qstring s;
 	if (h.root == GLOBAL_ROOT) s.sprnt("%a", ea_t(h.base_off));
+	else if (h.root == FRAME_ROOT)
+		s.sprnt("frame%+lld", (long long)h.base_off);
 	else
 		s.sprnt("var%d%+lld", h.root, (long long)h.base_off);
 	return s;
@@ -271,8 +225,6 @@ void find_class_infos(
 
 		// Rejects a plain INT_MAX stored in the same function
 		qstring category;
-		auto c = h.fields.find("category");
-
 		if (!str_field(h, "category", category) || category.empty()) {
 			rv_log("  -> rejected: category is not a constant string");
 			continue;
@@ -324,18 +276,19 @@ bool looks_like_factory_info(ea_t ea, const layout_t& info) {
 		   get_dword(ea + flags->off) <= 0x1F; // kUnicode is the top flag
 }
 
-void lower_factory_info(
-	factory_collector_t& col, const call_t& c, const layout_t& info) {
-	for (const call_arg_t& a : c.args) {
-		if (a.k != call_arg_t::OBJ || !looks_like_factory_info(a.ea, info))
-			continue;
+// A complete PFactoryInfo in data, passed to the factory constructor or copied
+// by an inlined one
+void lower_factory_infos(factory_collector_t& col, const layout_t& info) {
+	for (const ea_t ea : col.globals) {
+		if (!looks_like_factory_info(ea, info)) continue;
+
 		for (const field_desc_t& f : info.fields) {
-			const loc_t at{ GLOBAL_ROOT, int64(a.ea + f.off) };
+			const loc_t at{ GLOBAL_ROOT, int64(ea + f.off) };
 			if (f.kind == F_STR)
-				col.copies.push_back(copy_of(at, a.ea + f.off, c.ea));
+				col.copies.push_back(copy_of(at, ea + f.off, ea));
 			else {
-				store_t s = num_store(at, f.sz, 0, c.ea);
-				if (read_const(a.ea + f.off, f.sz, s.val))
+				store_t s = num_store(at, f.sz, 0, ea);
+				if (read_const(ea + f.off, f.sz, s.val))
 					col.stores.push_back(std::move(s));
 			}
 		}
@@ -461,9 +414,10 @@ void lower_call_args(
 	uint32 uid[4] = {};
 	bool have_uid = false;
 
+	if (have_info) lower_factory_infos(col, info);
+
 	for (const call_t& c : calls) {
 		if (match_uid_builder(c.args, uid)) have_uid = true;
-		if (have_info) lower_factory_info(col, c, info);
 		if (have_cls)
 			lower_class_info(col, c, cls, have_uid ? &uid : nullptr, com);
 	}
@@ -553,6 +507,7 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 	if (cf == nullptr) return out;
 
 	factory_collector_t col(cf);
+	col.inline_calls = true;
 	col.apply_to(&cf->body, nullptr);
 
 	call_collector_t cc;
@@ -587,6 +542,12 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 
 	find_class_infos(col, out);
 	find_factory_infos(col, out);
+
+	// A PFactoryInfo on the stack, split into one lvar per member
+	factory_collector_t frame(cf);
+	frame.stores = frame_view(cf, col.stores);
+	frame.copies = frame_view(cf, col.copies);
+	find_factory_infos(frame, out);
 	return out;
 }
 

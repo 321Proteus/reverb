@@ -28,6 +28,10 @@ ea_t resolve_thunk(ea_t ea, int max_hops = 3);
 // The constant of a function that decompiles to just `return <const>;`
 bool const_return(ea_t ea, uint64* out);
 
+// The one call of a function that only forwards: return f(...); or
+// f(...); return;
+cexpr_t* tail_call(cfunc_t* cf);
+
 /*
 	The callee of a function that only forwards: return f(...); or f(...);
 	return;. Sets indirect when the one call goes through a pointer (virtual
