@@ -1,3 +1,8 @@
+/**
+ * @file apply.cpp
+ * @brief Applies the vtable model to the IDB: types, names, prototypes,
+ * comments.
+ */
 #include "apply.hpp"
 #include "db/read.hpp"
 #include "layout.hpp"
@@ -37,6 +42,12 @@ tinfo_t find_class_type(const qstring& cls) {
 
 namespace rv::vtbl {
 
+/**
+ * @brief Sets the "shared by N vtable slots" function comment, replacing an
+ * earlier one
+ *
+ * @return true if the comment changed
+ */
 static bool set_shared_cmt(ea_t f, int refs) {
 	qstring cmt, out, line;
 	line.sprnt("shared by %d vtable slots", refs);
@@ -63,6 +74,10 @@ static bool set_shared_cmt(ea_t f, int refs) {
 	return out != cmt && set_func_cmt(func, out.c_str(), true);
 }
 
+/**
+ * @brief Prototype for the function in slot @p s: the interface member type,
+ * with this retyped to the owner class where that is valid
+ */
 static tinfo_t slot_prototype(
 	const slot_rec& s, const func_rec& fr, const label_policy& p) {
 	tinfo_t ft = s.type.is_ptr() ? s.type.get_pointed_object() : s.type;

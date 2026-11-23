@@ -1,3 +1,7 @@
+/**
+ * @file hexrays.cpp
+ * @brief Hex-Rays side of vtable analysis: constructor stores and virtual calls.
+ */
 #include "hexrays.hpp"
 #include "db/read.hpp"
 #include "decomp/ctree.hpp"

@@ -10,6 +10,10 @@
 #include <tuple>
 #include <ua.hpp>
 
+/**
+ * @file model.cpp
+ * @brief Vtable model: collection, owner resolution and naming of slot functions.
+ */
 namespace rv::vtbl {
 
 constexpr uint16 R_CX = 1, R_SP = 4, R_BP = 5, R_DI = 7;
@@ -18,7 +22,9 @@ static bool is_reg(const op_t& o, uint16 r) {
 	return o.type == o_reg && o.reg == r;
 }
 
-// Immediate or displacement as by operand size
+/**
+ * @brief Immediate or displacement @p v sign-extended by operand size
+ */
 static sval_t signed_val(const op_t& o, uval_t v) {
 	switch (get_dtype_size(o.dtype)) {
 	case 1:	 return sval_t(int8(v));
@@ -28,11 +34,13 @@ static sval_t signed_val(const op_t& o, uval_t v) {
 	}
 }
 
-/*
-	this += delta: add/sub rcx/rdi/ecx, imm; lea rcx, [rcx+imm]; stdcall
-	add/sub dword ptr [esp+4], imm ([esp+8] or [ebp+8] inside a frame).
-	specflag1 = has SIB, specflag2 = SIB byte (index 4 = none)
-*/
+/**
+ * @brief Recognizes an instruction adding a constant to this
+ *
+ * `this += delta`: `add/sub rcx/rdi/ecx, imm`; `lea rcx, [rcx+imm]`; stdcall
+ * `add/sub dword ptr [esp+4], imm` (`[esp+8]` or `[ebp+8]` inside a frame).
+ * specflag1 = has SIB, specflag2 = SIB byte (index 4 = none)
+ */
 static bool this_adjust(const insn_t& in, bool frame, sval_t& delta) {
 	const bool x64 = inf_is_64bit();
 	auto this_reg = [&](const op_t& o) {
@@ -116,11 +124,17 @@ bool adjustor_thunk(ea_t ea, ea_t* target, sval_t* delta) {
 	return false;
 }
 
+/**
+ * @brief Whether the vtable type @p t fits in @p extent slots
+ */
 static bool fits(const tinfo_t& t, size_t extent) {
 	const size_t sz = t.get_size();
 	return sz != BADSIZE && sz != 0 && sz / ptr_size() <= extent;
 }
 
+/**
+ * @brief Looks up the `<iface>_vtbl` struct for @p iface
+ */
 static bool vtbl_type(const qstring& iface, tinfo_t& out) {
 	const qstring n = resolve_type(VST3_SCOPE, (iface + "_vtbl").c_str());
 	return !n.empty() && out.get_named_type(nullptr, n.c_str()) &&
@@ -292,8 +306,12 @@ void model::collect() {
 	assign_names();
 }
 
-// Record for owner (any if null): direct before via thunk, primary before
-// secondary, then by address so the choice doesn't depend on discovery order
+/**
+ * @brief Best slot record of @p recs for @p owner (any if null), or -1
+ *
+ * Direct before via thunk, primary before secondary, then by address so the
+ * choice doesn't depend on discovery order.
+ */
 static int pick_rec(const std::vector<slot_rec>& slots,
 	const std::vector<int>& recs, const qstring* owner) {
 	auto key = [&](int i) {
@@ -310,11 +328,13 @@ static int pick_rec(const std::vector<slot_rec>& slots,
 	return best;
 }
 
-/*
-	The class a function shared by recs is named after: the only owner, an
-	owner that is a base of all the others, or else the deepest base all
-	owners share at their slot offsets (siblings inheriting one method)
-*/
+/**
+ * @brief Finds the owner of a function shared by @p recs
+ *
+ * The class a function shared by recs is named after: the only owner, an
+ * owner that is a base of all the others, or else the deepest base all
+ * owners share at their slot offsets (siblings inheriting one method)
+ */
 bool model::resolve_owner(const std::vector<int>& recs, func_rec& fr) const {
 	std::set<qstring> owners;
 	for (int i : recs)
@@ -425,12 +445,14 @@ void model::classify(ea_t f, const std::vector<int>& recs) {
 	funcs[f] = fr;
 }
 
-/*
-	"owner::method", "$thunk<off>" for thunks. Functions with the same name
-	are entry points of one method (GCC emits this-adjusted copies that are
-	not thunks): the lowest this offset keeps the name, the others get
-	"$adj<off>", offsets in hex.
-*/
+/**
+ * @brief Names the functions
+ *
+ * `owner::method`, `$thunk<off>` for thunks. Functions with the same name
+ * are entry points of one method (GCC emits this-adjusted copies that are
+ * not thunks): the lowest this offset keeps the name, the others get
+ * `$adj<off>`, offsets in hex.
+ */
 void model::assign_names() {
 	std::map<qstring, std::vector<ea_t>> by_name;
 

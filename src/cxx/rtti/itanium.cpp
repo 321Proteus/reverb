@@ -3,17 +3,23 @@
 #include <demangle.hpp>
 #include <name.hpp>
 
-/*
-	Itanium C++ ABI (GCC, Clang, MinGW). A typeinfo is { vptr, name* } plus,
-	depending on the vptr's __cxxabiv1 class:
-	  __class_type_info      nothing (no bases)
-	  __si_class_type_info   base typeinfo*
-	  __vmi_class_type_info  flags, base_count, { typeinfo*, offset_flags }[]
-	A vtable address point has the typeinfo at -1, offset-to-top at -2.
-*/
+/**
+ * @file itanium.cpp
+ * @brief Itanium C++ ABI RTTI backend (GCC, Clang, MinGW)
+ *
+ * A typeinfo is `{ vptr, name* }` plus, depending on the vptr's `__cxxabiv1`
+ * class:
+ * - `__class_type_info`: nothing (no bases)
+ * - `__si_class_type_info`: base `typeinfo*`
+ * - `__vmi_class_type_info`: `flags, base_count, { typeinfo*, offset_flags }[]`
+ *
+ * A vtable address point has the typeinfo at -1, offset-to-top at -2.
+ */
 namespace rv::rtti::itanium {
 
-// Demangled typeinfo name
+/**
+ * @brief Demangled typeinfo name, or empty if @p ti is not a typeinfo
+ */
 static qstring type_name(ea_t ti) {
 	if (!is_loaded(ti)) return qstring();
 	const ea_t p = read_ptr(ti + ptr_size());
@@ -134,7 +140,9 @@ bool parse_typeinfo(const ref_index&, ea_t ti, class_info* out) {
 	return true;
 }
 
-// The typeinfo holds a pointer to the name, right after its vptr
+/**
+ * @brief The typeinfo holds a pointer to the name, right after its vptr
+ */
 ea_t typeinfo_of_name(const ref_index& refs, ea_t s) {
 	if (const std::vector<ea_t>* r = refs.ptr_refs(s))
 		for (ea_t at : *r)
@@ -142,12 +150,14 @@ ea_t typeinfo_of_name(const ref_index& refs, ea_t s) {
 	return BADADDR;
 }
 
-/*
-	Slot -1 is the typeinfo, slot -2 offset-to-top (0 or negative,
-	pointer-aligned). Derived typeinfos also point at this one as a base;
-	those fail the offset-to-top check (si: a name pointer sits there) or
-	the first-slot check in abi.cpp (vmi: offset_flags sits there).
-*/
+/**
+ * @brief Candidate vtables from pointers to @p ti
+ *
+ * Slot -1 is the typeinfo, slot -2 offset-to-top (0 or negative,
+ * pointer-aligned). Derived typeinfos also point at this one as a base;
+ * those fail the offset-to-top check (si: a name pointer sits there) or
+ * the first-slot check in abi.cpp (vmi: offset_flags sits there).
+ */
 void vtable_candidates(const ref_index& refs, ea_t ti, std::vector<ea_t>& out) {
 	const int psz = ptr_size();
 	const std::vector<ea_t>* r = refs.ptr_refs(ti);
@@ -160,7 +170,10 @@ void vtable_candidates(const ref_index& refs, ea_t ti, std::vector<ea_t>& out) {
 	}
 }
 
-// Every stored pointer whose target looks like the start of a mangled name
+/**
+ * @brief Finds stored pointer whose target looks like the start of a mangled
+ * name
+ */
 void collect(const ref_index& refs, std::vector<ea_t>& out) {
 	for (const auto& [target, locs] : refs.ptrs()) {
 		const uchar c = get_byte(target);

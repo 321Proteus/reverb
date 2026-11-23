@@ -5,17 +5,22 @@
 #include <name.hpp>
 #include <nalt.hpp>
 
-/*
-	MSVC RTTI. vtable[-1] -> Complete Object Locator -> TypeDescriptor (holds
-	the ".?AV..." name inline) and Class Hierarchy Descriptor -> base array
-	of Base Class Descriptors. x64 stores the locator's fields as 32-bit
-	image-relative RVAs; vtable[-1] itself is always an absolute pointer.
-*/
+/**
+ * @file msvc.cpp
+ * @brief MSVC RTTI backend.
+ *
+ * `vtable[-1]` -> Complete Object Locator -> TypeDescriptor (holds the
+ * `".?AV..."` name inline) and Class Hierarchy Descriptor -> base array of
+ * Base Class Descriptors. x64 stores the locator's fields as 32-bit
+ * image-relative RVAs; `vtable[-1]` itself is always an absolute pointer.
+ */
 namespace rv::rtti::msvc {
 
 static bool use_rva() { return ptr_size() == 8; }
 
-// x64 stores image-relative RVAs, x86 absolute pointers
+/**
+ * @brief A 4-byte field (RVA on x64, absolute on x86) or BADADDR
+ */
 static ea_t field_ptr(ea_t field, bool rva) {
 	const uint32 v = get_dword(field);
 	if (v == 0) return BADADDR;
@@ -23,7 +28,9 @@ static ea_t field_ptr(ea_t field, bool rva) {
 	return is_loaded(ea) ? ea : BADADDR;
 }
 
-// Demangled TypeDescriptor name
+/**
+ * @brief Demangled TypeDescriptor name, or empty if @p td is not one
+ */
 static qstring type_name(ea_t td) {
 	qstring raw;
 	if (td == BADADDR || !read_cstr(td + 2 * ptr_size(), raw, MAX_NAME) ||
@@ -45,13 +52,17 @@ static qstring type_name(ea_t td) {
 
 bool is_typeinfo(ea_t ti) { return !type_name(ti).empty(); }
 
-/*
-	Complete Object Locator: signature, offset, cdOffset, pTypeDescriptor,
-	pClassHierarchyDescriptor, and on x64 pSelf (all fields 4 bytes).
-	x64 is validated by pSelf; x86 has no pSelf, so the hierarchy descriptor
-	is checked instead (it is what reverse lookups land on falsely, e.g. a
-	Base Class Descriptor that also points at the TypeDescriptor).
-*/
+/**
+ * @brief Validate a Complete Object Locator @p col
+ * @details checks signature, offset, cdOffset, pTypeDescriptor,
+ * pClassHierarchyDescriptor, and on x64 pSelf (all fields 4 bytes). x64 is
+ * validated by pSelf. x86 has no pSelf, so the hierarchy descriptor is checked
+ * instead (it is what reverse lookups land on falsely, e.g. a Base Class
+ * Descriptor that also points at the TypeDescriptor).
+ *
+ * @param col The address of the locator to validate
+ * @return true whether @p col is a valid COL
+ */
 static bool valid_col(ea_t col) {
 	const bool rva = use_rva();
 	if (!is_loaded(col) || !is_loaded(col + (rva ? 20 : 16))) return false;
@@ -122,7 +133,10 @@ bool parse_vtable(ea_t vt, class_info* out) {
 	return parse_col(read_ptr(vt - ptr_size()), out);
 }
 
-// Locators describing the TypeDescriptor td, one per vtable of the class
+/**
+ * @brief Locators describing the TypeDescriptor @p td, one per vtable of the
+ * class
+ */
 static std::vector<ea_t> cols_of(const ref_index& refs, ea_t td) {
 	std::vector<ea_t> out;
 	const std::vector<ea_t>* r =
@@ -159,13 +173,17 @@ bool parse_typeinfo(const ref_index& refs, ea_t ti, class_info* out) {
 	return true;
 }
 
-// The name is inline in the TypeDescriptor, after pVFTable and spare
+/**
+ * @brief The name is inline in the TypeDescriptor, after pVFTable and spare
+ */
 ea_t typeinfo_of_name(const ref_index&, ea_t s) {
 	const ea_t td = s - 2 * ptr_size();
 	return is_typeinfo(td) ? td : BADADDR;
 }
 
-// TypeDescriptor <- locator <- vtable[-1]
+/**
+ * @brief TypeDescriptor <- locator <- vtable[-1]
+ */
 void vtable_candidates(const ref_index& refs, ea_t ti, std::vector<ea_t>& out) {
 	for (ea_t col : cols_of(refs, ti))
 		if (const std::vector<ea_t>* r = refs.ptr_refs(col))
@@ -173,7 +191,10 @@ void vtable_candidates(const ref_index& refs, ea_t ti, std::vector<ea_t>& out) {
 				out.push_back(at + ptr_size());
 }
 
-// TypeDescriptors are { pVFTable, spare, ".?AV..." / ".?AU..." }
+/**
+ * @brief Scan data segments for TypeDescriptors:
+ * `{ pVFTable, spare, ".?AV..." / ".?AU..." }`
+ */
 void collect(const ref_index&, std::vector<ea_t>& out) {
 	const int psz = ptr_size();
 	const int flags = BIN_SEARCH_FORWARD | BIN_SEARCH_CASE |
