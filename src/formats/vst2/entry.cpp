@@ -2,6 +2,7 @@
 #include "decomp/ctree.hpp"
 #include "vst2.hpp"
 #include "decomp/analysis.hpp"
+#include "decomp/returns.hpp"
 #include <auto.hpp>
 #include <funcs.hpp>
 #include <hexrays.hpp>
@@ -114,5 +115,8 @@ void label_entry() {
 		mark_cfunc_dirty(pfn->start_ea);
 	}
 	rv_log("Typed VST2 entry point at %a", pfn->start_ea);
+
+	// &wrapper->effect: JUCE VSTPluginMain forwards to pluginEntryPoint
+	rv::type_return_base(pfn->start_ea, "VST2 entry", 2);
 }
 } // namespace rv::vst2
