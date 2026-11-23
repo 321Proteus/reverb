@@ -1,6 +1,6 @@
 #pragma once
 #include "core/reverb.hpp"
-#include "patterns/taint.hpp"
+#include "patterns/taint/taint.hpp"
 #include <cstddef>
 
 /**

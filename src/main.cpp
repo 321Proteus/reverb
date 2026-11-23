@@ -24,7 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
-#include "patterns/taint.hpp"
+#include "patterns/taint/taint.hpp"
 
 /**
  * @brief Find and load the TIL library containing the plugin format types
