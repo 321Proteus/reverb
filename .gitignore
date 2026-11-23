@@ -2,3 +2,4 @@ build/
 venv/
 .vscode/settings.json
 tools/__pycache__
+tools/tilgen/__pycache__

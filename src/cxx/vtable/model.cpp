@@ -1,5 +1,6 @@
 #include "model.hpp"
 #include "db/read.hpp"
+#include "db/type_name.hpp"
 #include "layout.hpp"
 #include <algorithm>
 #include <allins.hpp>
@@ -121,7 +122,8 @@ static bool fits(const tinfo_t& t, size_t extent) {
 }
 
 static bool vtbl_type(const qstring& iface, tinfo_t& out) {
-	return out.get_named_type(nullptr, (iface + "_vtbl").c_str()) &&
+	const qstring n = resolve_type(VST3_SCOPE, (iface + "_vtbl").c_str());
+	return !n.empty() && out.get_named_type(nullptr, n.c_str()) &&
 		   out.is_struct();
 }
 

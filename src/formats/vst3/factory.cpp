@@ -1,7 +1,11 @@
 #include "factory.hpp"
 #include "core/log.hpp"
+#include "cxx/rtti/abi.hpp"
+#include "cxx/vtable/apply.hpp"
+#include "cxx/vtable/hexrays.hpp"
 #include "db/read.hpp"
 #include "db/types.hpp"
+#include "db/type_name.hpp"
 #include "decomp/call.hpp"
 #include <bytes.hpp>
 #include <cstring>
@@ -31,6 +35,12 @@ constexpr const char* FACTORY_INFO_MEMBERS[] = { "vendor", "url", "email",
 
 constexpr const char* CLASS_INFO_MEMBERS[] = { "cid", "cardinality", "category",
 	"name", "classFlags", "subCategories", "vendor", "version", "sdkVersion" };
+
+struct embed_hint_t {
+	int root;
+	int64 base_off;
+	const char* type;
+};
 
 /*
 	Adds stores to globals, and the inlined strncpy8 calls.
@@ -85,6 +95,26 @@ struct factory_collector_t : public store_collector_t {
 	}
 
 	int idaapi visit_expr(cexpr_t* e) override {
+
+		if (e->op == cot_call && e->x->op == cot_helper && e->a != nullptr &&
+			e->a->size() >= 2 && streq(e->x->helper, "strcpy")) {
+
+			cexpr_t* src = strip_casts(&e->a->at(1));
+			loc_t at;
+
+			if (src->op == cot_str && fold_addr(&e->a->at(0), &alias, at)) {
+				store_t s;
+				s.loc = at;
+				s.ea = e->ea;
+				s.text = expr_str(e, cf);
+				s.val.t = val_t::STR;
+				s.val.str = src->string;
+				s.size = int(strlen(src->string)) + 1; // with the NUL
+				stores.push_back(std::move(s));
+			}
+
+			return 0;
+		}
 		if (e->op == cot_sub) {
 			add_copy(e);
 			return 0;
@@ -99,6 +129,60 @@ struct factory_collector_t : public store_collector_t {
 		return store_collector_t::visit_expr(e);
 	}
 };
+
+// A char array written as immediates, the bytes of every NUM store that
+// overlaps
+static bool string_image(const std::vector<store_t>& stores, int root,
+	int64 foff, int sz, qstring& out, ea_t& last_ea) {
+	last_ea = BADADDR;
+	if (sz <= 0 || inf_is_be()) return false;
+	std::vector<int> img(sz, -1);
+
+	for (const store_t& s : stores) {
+		if (s.loc.var != root || s.loc.off >= foff + sz ||
+			s.loc.off + s.size <= foff)
+			continue;
+
+		const bool known =
+			!s.is_or && (s.val.t == val_t::NUM || s.val.t == val_t::STR);
+		if (known) last_ea = s.ea;
+
+		for (int i = 0; i < s.size; i++) {
+			const int64 at = s.loc.off + i - foff;
+			if (at < 0 || at >= sz) continue;
+
+			int b = -1;
+			if (known) {
+				if (s.val.t == val_t::STR)
+					b = i < int(s.val.str.length()) ? uchar(s.val.str[i]) : 0;
+				else if (s.val.raw_len > 0)
+					b = (i < s.val.raw_len) ? s.val.raw[i] : -1;
+
+				else if (i < 8)
+					b = int((s.val.num >> (8 * i)) & 0xFF);
+
+				else if (!s.val.num)
+					b = 0;
+			}
+
+			img[at] = b;
+		}
+	}
+
+	out.clear();
+	for (int i = 0; i < sz; i++) {
+		if (img[i] < 0) return false; // unknown byte before the terminator
+		if (img[i] == 0) return out.length() >= 1 && is_text(out);
+		out += char(img[i]);
+	}
+	return false; // not terminated
+}
+
+bool has_copy(const factory_collector_t& col, int root, int64 off) {
+	for (const store_t& c : col.copies)
+		if (c.loc.var == root && c.loc.off == off) return true;
+	return false;
+}
 
 // The collected stores, plus what only the layout can turn into stores
 std::vector<store_t> stores_for(const factory_collector_t& col,
@@ -122,6 +206,17 @@ std::vector<store_t> stores_for(const factory_collector_t& col,
 			pieces.loc = loc_t{ h.root, foff };
 			pieces.size = f.sz;
 			out.push_back(std::move(pieces));
+		}
+
+		if (f.kind == F_STR && !has_copy(col, h.root, foff)) {
+			qstring str;
+			ea_t ea;
+			if (string_image(col.stores, h.root, foff, f.sz, str, ea)) {
+				store_t s = num_store(loc_t{ h.root, foff }, f.sz, 0, ea);
+				s.val.t = val_t::STR;
+				s.val.str = str;
+				out.push_back(std::move(s));
+			}
 		}
 
 		for (const store_t& c : col.copies) {
@@ -152,7 +247,9 @@ void find_class_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
 	layout_t layout;
-	if (!load_layout("PClassInfo2", CLASS_INFO_MEMBERS, layout)) return;
+	if (!load_layout(
+			vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, layout))
+		return;
 	const int64 card_off = layout.find("cardinality")->off;
 
 	std::set<std::pair<int, int64>> seen;
@@ -175,19 +272,13 @@ void find_class_infos(
 		// Rejects a plain INT_MAX stored in the same function
 		qstring category;
 		auto c = h.fields.find("category");
-		if (c == h.fields.end() || c->second.v.t != val_t::ADDR ||
-			!read_utf8(c->second.v.ea, category) || category.empty()) {
+
+		if (!str_field(h, "category", category) || category.empty()) {
 			rv_log("  -> rejected: category is not a constant string");
 			continue;
 		}
 		out.push_back(std::move(h));
 	}
-}
-
-bool has_copy(const factory_collector_t& col, int root, int64 off) {
-	for (const store_t& c : col.copies)
-		if (c.loc.var == root && c.loc.off == off) return true;
-	return false;
 }
 
 store_t raw_store(loc_t at, const uchar* raw, int size, ea_t ea) {
@@ -251,58 +342,108 @@ void lower_factory_info(
 	}
 }
 
+// The category strings are fixed SDK constants
+constexpr const char* KNOWN_CATEGORIES[] = {
+	"Audio Module Class",
+	"Component Controller Class",
+	"Test Class",
+};
+
+bool is_known_category(const call_arg_t& a) {
+	qstring s;
+	if (a.k == call_arg_t::STR) s = a.str;
+	else if (a.k == call_arg_t::OBJ) {
+		if (!read_utf8(a.ea, s)) return false;
+	} else
+		return false;
+
+	for (const char* k : KNOWN_CATEGORIES)
+		if (s == k) return true;
+	return false;
+}
+
 // PClassInfo2 ctor: (this, cid, cardinality, category, name, classFlags,
-// subCategories, vendor, version, sdkVersion). Anchored on kManyInstances.
+// subCategories, vendor, version, sdkVersion). Anchored on a known category
+// string, or on kManyInstances. A category anchor implies the cardinality, as
+// it may be a non-constant argument
 void lower_class_info(factory_collector_t& col, const call_t& c,
 	const layout_t& cls, const uint32 (*uid)[4], bool com) {
 	const std::vector<call_arg_t>& A = c.args;
 	const size_t n = cls.fields.size();
 
-	size_t card = 0; // position of cardinality in the layout
+	size_t card = 0, cat = 0; // positions in the layout
 	while (card < n && cls.fields[card].name != "cardinality")
 		card++;
-	if (card == n) return;
+	while (cat < n && cls.fields[cat].name != "category")
+		cat++;
+	if (card == n || cat == n) return;
 
-	for (size_t j = card + 1; j < A.size(); j++) {
-		if (A[j].k != call_arg_t::NUM || uint32(A[j].num) != MANY_INSTANCES)
-			continue;
+	size_t first = A.size(); // argument holding cid
+	bool by_category = false;
 
-		const size_t first = j - card; // argument holding cid
-		if (first + n > A.size()) return;
-
-		const call_arg_t& self = A[first - 1];
-		loc_t base;
-		if (self.k == call_arg_t::OBJ)
-			base = loc_t{ GLOBAL_ROOT, int64(self.ea) };
-		else if (self.k == call_arg_t::VAR)
-			base = loc_t{ self.var, 0 };
-		else
-			return;
-
-		for (size_t i = 0; i < n; i++) {
-			const field_desc_t& f = cls.fields[i];
-			const call_arg_t& a = A[first + i];
-			const loc_t at{ base.var, base.off + f.off };
-
-			if (f.name == "cid") {
-				uchar raw[16] = {};
-				if (a.k == call_arg_t::OBJ) {
-					if (get_bytes(raw, 16, a.ea) != 16) continue;
-				} else if (a.k == call_arg_t::VAR && uid != nullptr)
-					tuid_from_longs(*uid, com, raw);
-				else
-					continue;
-				col.stores.push_back(raw_store(at, raw, 16, c.ea));
-			} else if (f.kind == F_INT && a.k == call_arg_t::NUM)
-				col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
-			else if (f.kind == F_STR && a.k == call_arg_t::OBJ)
-				col.copies.push_back(copy_of(at, a.ea, c.ea));
-			else if (f.kind == F_STR && a.k == call_arg_t::STR)
-				rv_log("    %s at %a is a cot_str with no address",
-					f.name.c_str(), c.ea);
-			// NUM 0 for a string is a NULL pointer: leave the field unwritten
+	for (size_t j = cat; j < A.size() && first == A.size(); j++)
+		if (is_known_category(A[j])) {
+			first = j - cat;
+			by_category = true;
 		}
+
+	if (first == A.size())
+		for (size_t j = card + 1; j < A.size(); j++)
+			if (A[j].k == call_arg_t::NUM &&
+				uint32(A[j].num) == MANY_INSTANCES) {
+				first = j - card;
+				break;
+			}
+
+	if (first == A.size() || first == 0 || first + n > A.size()) return;
+
+	const call_arg_t& self = A[first - 1];
+	loc_t base;
+	if (self.k == call_arg_t::OBJ) base = loc_t{ GLOBAL_ROOT, int64(self.ea) };
+	else if (self.k == call_arg_t::VAR)
+		base = loc_t{ self.var, 0 };
+	else
 		return;
+
+	for (size_t i = 0; i < n; i++) {
+		const field_desc_t& f = cls.fields[i];
+		const call_arg_t& a = A[first + i];
+		const loc_t at{ base.var, base.off + f.off };
+
+		if (f.name == "cid") {
+			uchar raw[16] = {};
+
+			if (a.k == call_arg_t::OBJ) {
+				if (get_bytes(raw, 16, a.ea) != 16) continue;
+
+			} else if (a.k == call_arg_t::VAR && uid != nullptr)
+				tuid_from_longs(*uid, com, raw);
+			else
+				continue;
+
+			col.stores.push_back(raw_store(at, raw, 16, c.ea));
+
+		} else if (f.name == "cardinality") {
+			if (a.k == call_arg_t::NUM)
+				col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
+			else if (by_category)
+				col.stores.push_back(num_store(at, f.sz, MANY_INSTANCES, c.ea));
+
+		} else if (f.kind == F_INT && a.k == call_arg_t::NUM)
+			col.stores.push_back(num_store(at, f.sz, a.num, c.ea));
+
+		else if (f.kind == F_STR && a.k == call_arg_t::OBJ)
+			col.copies.push_back(copy_of(at, a.ea, c.ea));
+
+		else if (f.kind == F_STR && a.k == call_arg_t::STR) {
+			store_t s;
+			s.loc = at;
+			s.ea = c.ea;
+			s.val.t = val_t::STR;
+			s.val.str = a.str;
+			s.size = int(a.str.length()) + 1;
+			col.stores.push_back(std::move(s));
+		}
 	}
 }
 
@@ -311,9 +452,10 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 void lower_call_args(
 	factory_collector_t& col, const std::vector<call_t>& calls) {
 	layout_t cls, info;
-	const bool have_cls = load_layout("PClassInfo2", CLASS_INFO_MEMBERS, cls);
-	const bool have_info =
-		load_layout("PFactoryInfo", FACTORY_INFO_MEMBERS, info);
+	const bool have_cls =
+		load_layout(vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, cls);
+	const bool have_info = load_layout(
+		vst3_type("PFactoryInfo").c_str(), FACTORY_INFO_MEMBERS, info);
 	const bool com = inf_get_filetype() == f_PE;
 
 	uint32 uid[4] = {};
@@ -336,10 +478,14 @@ void find_factory_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
 	layout_t classes;
-	if (!load_layout("PClassInfo2", CLASS_INFO_MEMBERS, classes)) return;
+	if (!load_layout(
+			vst3_type("PClassInfo2").c_str(), CLASS_INFO_MEMBERS, classes))
+		return;
 
 	layout_t layout;
-	if (!load_layout("PFactoryInfo", FACTORY_INFO_MEMBERS, layout)) return;
+	if (!load_layout(
+			vst3_type("PFactoryInfo").c_str(), FACTORY_INFO_MEMBERS, layout))
+		return;
 	const int64 url_off = layout.find("url")->off;
 	const int64 email_off = layout.find("email")->off;
 
@@ -371,6 +517,35 @@ void find_factory_infos(
 	}
 }
 
+std::vector<embed_hint_t> get_embedded(cfunc_t* cf) {
+	std::vector<embed_hint_t> out;
+
+	tinfo_t info;
+	if (!info.get_named_type(nullptr, vst3_type("PFactoryInfo").c_str()))
+		return out;
+
+	vtbl::store_finder_t vf;
+	vf.apply_to(&cf->body, nullptr);
+
+	for (const auto& h : vf.hits) {
+		if (h.this_offset) continue;
+
+		rtti::class_info ci;
+		if (!rtti::parse_rtti(h.vtable_ea, &ci)) continue;
+
+		const tinfo_t cls = find_class_type(ci.name);
+		if (cls.empty()) continue; // no til for this framework
+
+		int64 off;
+		if (!find_embedded(cls, info, 0, off)) continue;
+
+		rv_log("  %s keeps PFactoryInfo at +0x%llX", ci.name.c_str(),
+			(unsigned long long)off);
+		out.push_back({ h.var_idx, off, "PFactoryInfo" });
+	}
+	return out;
+}
+
 } // namespace
 
 std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
@@ -389,6 +564,27 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 
 	lower_call_args(col, cc.calls);
 
+	bool have_info = false;
+	for (const embed_hint_t& e : get_embedded(cf)) {
+		layout_t layout;
+		if (!load_layout(
+				vst3_type(e.type).c_str(), FACTORY_INFO_MEMBERS, layout))
+			continue;
+
+		factory_struct_t h;
+		h.type = e.type;
+		h.root = e.root;
+		h.base_off = e.base_off;
+
+		resolve(col, layout, h);
+		out.push_back(std::move(h));
+		have_info = true;
+	}
+
+	find_class_infos(col, out);
+	if (!have_info) find_factory_infos(col, out); // anchor fallback
+	return out;
+
 	find_class_infos(col, out);
 	find_factory_infos(col, out);
 	return out;
@@ -397,8 +593,14 @@ std::vector<factory_struct_t> extract_factory_structs(cfunc_t* cf) {
 bool str_field(const factory_struct_t& s, const char* f, qstring& out) {
 	auto it = s.fields.find(f);
 
-	return it != s.fields.end() && it->second.v.t == val_t::ADDR &&
-		   read_utf8(it->second.v.ea, out);
+	if (it == s.fields.end()) return false;
+	const val_t& v = it->second.v;
+
+	if (v.t == val_t::STR) {
+		out = v.str;
+		return true;
+	}
+	return v.t == val_t::ADDR && read_utf8(v.ea, out);
 }
 
 bool num_field(const factory_struct_t& s, const char* f, uint64& out) {

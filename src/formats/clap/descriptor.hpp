@@ -10,7 +10,7 @@ namespace rv::clap {
 struct desc_t {
 	ea_t ea = BADADDR;		// BADADDR when only built at runtime
 	ea_t init_ea = BADADDR; // function that fills it in, if any
-	abi::clap_version_t clap_version{};
+	version_t clap_version{};
 	qstring id, name, vendor, version; // empty when unset (NULL or "")
 	ea_t features_ea = BADADDR;
 	qstrvec_t features;

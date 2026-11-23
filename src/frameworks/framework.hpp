@@ -16,6 +16,9 @@ struct FrameworkModule {
 
 	qstring (*detect_version)();
 	void (*label)(Interface iface);
+
+	// "juce": the framework's type libraries are rv_juce_v<version>_<abi>.til
+	const char* til_name = nullptr;
 };
 
 struct FrameworkInfo {

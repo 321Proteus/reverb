@@ -112,13 +112,11 @@ jobs:
           path: artifacts/*
           if-no-files-found: error
 
-  release:
+  package:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [versions, build]
     runs-on: macos-latest
-    permissions:
-      contents: write
-    name: release for IDA ${{ matrix.ida }}
+    name: package for IDA ${{ matrix.ida }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,10 +144,42 @@ jobs:
           fi
           (cd pkg && zip -r "../reverb-ida${v}.zip" .)
 
-      - name: Upload release assets
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-ida${{ matrix.ida }}
+          path: reverb-ida${{ matrix.ida }}.zip
+          if-no-files-found: error
+
+  # One job creates the release, with every IDA version's zip: matrix jobs
+  # uploading to the same tag at once can race and make duplicate releases.
+  # It stays a draft: the type libraries (tools/tilgen/package.sh) are not
+  # built here, they are attached by hand before it is published.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: package-ida*
+          merge-multiple: true
+
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          files: reverb-ida${{ matrix.ida }}.zip
+          draft: true
+          files: dist/reverb-ida*.zip
           fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Pick the zip matching your IDA version.
+
+            The framework type libraries are `reverb-tils-<date>.tar.xz` (optional). Extract it into the `til` directory of your IDA user directory:
+            `tar -xJf reverb-tils-<date>.tar.xz -C ~/.idapro/til` (Windows: `%APPDATA%\Hex-Rays\IDA Pro\til`).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
