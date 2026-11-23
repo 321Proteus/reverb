@@ -72,7 +72,29 @@ host() {
 
 BUILD_STATE=build/tilgen-docker
 
+container_path() {
+    local p
+    p="$(realpath -m -- "$1")"
+    case "$p" in
+        "$REPO") echo /work ;;
+        "$REPO"/*) echo "/work/${p#"$REPO"/}" ;;
+        *) echo "run.sh docker: $1 is outside $REPO, the container cannot write it" >&2
+           return 1 ;;
+    esac
+}
+
 docker_run() {
+    local args=() prev= a
+    for a in "$@"; do
+        case "$prev" in
+            --out|--db) a="$(container_path "$a")" || exit 1 ;;
+        esac
+        case "$a" in
+            --out=*|--db=*) a="${a%%=*}=$(container_path "${a#*=}")" || exit 1 ;;
+        esac
+        args+=("$a"); prev="$a"
+    done
+    set -- "${args[@]}"
     local state="$REPO/$BUILD_STATE"
     mkdir -p "$state/home/.idapro"
 
