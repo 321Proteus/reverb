@@ -1,22 +1,28 @@
 #pragma once
+/**
+ * @file segments.hpp
+ * @brief Segment classification helpers (code, data, imports, metadata, GOT).
+ */
 #include <pro.h>
 #include <bytes.hpp>
 #include <funcs.hpp>
 #include <segment.hpp>
 
+/** @brief Whether @p ea is in an executable or code segment */
 inline bool in_exec_seg(ea_t ea) {
 	segment_t* s = getseg(ea);
 	if (!s) return false;
 	return (s->perm & SEGPERM_EXEC) != 0 || s->type == SEG_CODE;
 }
 
-// Imports (extern, IAT, Mach-O stub targets)
+/** @brief Whether @p ea is in an import segment (extern, IAT, Mach-O stub
+ * targets) */
 inline bool in_extern_seg(ea_t ea) {
 	segment_t* s = getseg(ea);
 	return s != nullptr && s->type == SEG_XTRN;
 }
 
-// Find nwind and exception table references
+/** @brief Whether @p ea is in an unwind or exception table section */
 static bool in_metadata_seg(ea_t ea) {
 	segment_t* s = getseg(ea);
 	if (!s) return false;
@@ -43,7 +49,8 @@ static bool in_metadata_seg(ea_t ea) {
 	return false;
 }
 
-// Pointer slots the loader resolves: ELF GOT, Mach-O symbol pointers
+/** @brief Whether @p ea is in a pointer section the loader resolves: ELF GOT,
+ * Mach-O symbol pointers */
 inline bool in_got_seg(ea_t ea) {
 	segment_t* s = getseg(ea);
 	if (!s) return false;
@@ -65,6 +72,10 @@ inline bool in_got_seg(ea_t ea) {
 	return false;
 }
 
+/**
+ * @brief Whether @p ea is code: a function, a code item, or an address in a
+ * code segment that is not analyzed yet
+ */
 inline bool is_code_addr(ea_t ea) {
 
 	if (ea == BADADDR || !is_mapped(ea)) return false;
@@ -78,11 +89,13 @@ inline bool is_code_addr(ea_t ea) {
 
 namespace rv {
 
-/*
-	Initialized, non-code segments: constants, vtables, RTTI, string literals.
-	Mach-O __TEXT data sections inherit R|X perms, so perms only decide
-	when the segment type says nothing
-*/
+/**
+ * @brief Whether @p s is an initialized, non-code segment: constants, vtables,
+ * RTTI, string literals
+ *
+ * Mach-O `__TEXT` data sections inherit R|X perms, so perms only decide when
+ * the segment type says nothing.
+ */
 inline bool is_data_seg(const segment_t* s) {
 	if (s == nullptr) return false;
 	if (s->type == SEG_CODE || s->type == SEG_XTRN || s->type == SEG_BSS)
@@ -92,6 +105,7 @@ inline bool is_data_seg(const segment_t* s) {
 	return true;
 }
 
+/** @brief Whether @p ea is loaded and in a data segment, see is_data_seg() */
 inline bool in_data_seg(ea_t ea) {
 	return is_loaded(ea) && is_data_seg(getseg(ea));
 }

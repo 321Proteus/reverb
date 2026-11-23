@@ -1,4 +1,8 @@
 #pragma once
+/**
+ * @file pick.hpp
+ * @brief Parsing of til file names and choosing the til that matches a library version.
+ */
 
 #include <cstdio>
 #include <string>
@@ -6,7 +10,7 @@
 
 namespace rv::til {
 
-// A <major>.<minor>.<patch> version tag
+/** @brief A `<major>.<minor>.<patch>` version tag */
 struct Version {
 	int major = 0, minor = 0, patch = 0;
 };
@@ -17,7 +21,11 @@ inline bool operator<(const Version& a, const Version& b) {
 	return a.patch < b.patch;
 }
 
-// "8.0.9", "v8.0.9", "8.0" (patch 0); false if there are fewer than two numbers
+/**
+ * @brief Parses `"8.0.9"`, `"v8.0.9"` or `"8.0"` (patch 0)
+ *
+ * @return false if there are fewer than two numbers
+ */
 inline bool parse_version(const char* s, Version* out) {
 	if (*s == 'v' || *s == 'V') s++;
 	*out = {};
@@ -25,28 +33,31 @@ inline bool parse_version(const char* s, Version* out) {
 		   2;
 }
 
-/*
-	One installed til: rv_<name>_v<tag>_<abi>.til for a versioned source
-	and optionally -<suffix>
-	rv_<name>_<abi>.til for one without versions.
-*/
+/**
+ * @brief One installed til
+ *
+ * `rv_<name>_v<tag>[-<suffix>]_<abi>.til` for a versioned source,
+ * `rv_<name>_<abi>.til` for one without versions.
+ */
 struct TilEntry {
 	Version v;
 	std::string suffix;
-	std::string file; // full path
-	std::string name; // file name without extension
+	std::string file; /**< Full path */
+	std::string name; /**< File name without extension */
 };
 
+/** @brief Whether @p s starts with @p p */
 inline bool starts_with(const std::string& s, const std::string& p) {
 	return s.compare(0, p.size(), p) == 0;
 }
 
+/** @brief Whether @p s ends with @p p */
 inline bool ends_with(const std::string& s, const std::string& p) {
 	return s.size() >= p.size() &&
 		   s.compare(s.size() - p.size(), p.size(), p) == 0;
 }
 
-// rv_<name>_<abi>.til
+/** @brief Matches `rv_<name>_<abi>.til` */
 inline bool parse_unversioned_file_name(const std::string& fname,
 	const std::string& name, const std::string& abi, TilEntry* out) {
 
@@ -59,7 +70,11 @@ inline bool parse_unversioned_file_name(const std::string& fname,
 	return true;
 }
 
-// False if it is not this source's til for abi
+/**
+ * @brief Matches a versioned til file name of source @p fw for @p abi
+ *
+ * @return false if it is not this source's til for @p abi
+ */
 inline bool parse_file_name(const std::string& fname, const std::string& fw,
 	const std::string& abi, TilEntry* out) {
 
@@ -90,15 +105,17 @@ inline bool parse_file_name(const std::string& fname, const std::string& fw,
 	return true;
 }
 
+/** @brief Result of pick() */
 struct Pick {
-	const TilEntry* entry = nullptr; // nullptr if too old
-	bool too_new = false;
+	const TilEntry* entry = nullptr; /**< nullptr if too old */
+	bool too_new = false;			 /**< Version is newer than every til */
 };
 
-/*
-	The newest til whose version is not above v. Newer than all of them picks
-	the newest one (too_new)
-*/
+/**
+ * @brief The newest til whose version is not above @p v
+ *
+ * Newer than all of them picks the newest one (`too_new`).
+ */
 inline Pick pick(const std::vector<TilEntry>& all, const Version& v) {
 	Pick p;
 	Version newest;

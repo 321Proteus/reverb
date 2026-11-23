@@ -1,4 +1,8 @@
 #pragma once
+/**
+ * @file types.hpp
+ * @brief Applying types at addresses and reading struct layouts from local types.
+ */
 #include "core/log.hpp"
 #include <pro.h>
 #include <bytes.hpp>
@@ -8,6 +12,12 @@
 #include <typeinf.hpp>
 #include <vector>
 
+/**
+ * @brief Applies the local type @p type_name at @p ea, replacing the items there
+ *
+ * @param out Receives the type, may be null
+ * @return false if the type is missing, unsized or cannot be applied
+ */
 inline bool apply_type_at(
 	ea_t ea, const char* type_name, tinfo_t* out = nullptr) {
 	tinfo_t tif;
@@ -30,11 +40,14 @@ inline bool apply_type_at(
 
 namespace rv {
 
-// A member layout from the local types
+/**
+ * @brief A member layout from the local types
+ */
 struct layout_t {
-	std::vector<field_desc_t> fields;
-	int size = 0;
+	std::vector<field_desc_t> fields; /**< Members, nested structs flattened by path */
+	int size = 0;					  /**< Size of the struct in bytes, 0 if unknown */
 
+	/** @return The field named @p name (possibly a dotted path), or null */
 	const field_desc_t* find(const char* name) const {
 		for (const field_desc_t& f : fields)
 			if (f.name == name) return &f;
@@ -42,6 +55,10 @@ struct layout_t {
 	}
 };
 
+/**
+ * @brief Kind of a member from its type: function pointer, C string pointer,
+ * other pointer, array, or integer
+ */
 inline fkind_t field_kind(const tinfo_t& t) {
 	if (t.is_funcptr()) return F_FN;
 
@@ -53,18 +70,25 @@ inline fkind_t field_kind(const tinfo_t& t) {
 	return t.is_array() ? F_STR : F_INT;
 }
 
-/*
-	Read the named members of a local struct type into out. A member may be
-	a path into nested structs (eg. version.major).
-	Kinds follow the member type:
-	F_FN - func pointer
-	F_CSTR - pointer to string
-	F_PTR - regular pointer
-	F_STR - array
-	F_INT anything else
-	A missing member fails the load if require_all is set, otherwise it is
-   skipped.
-*/
+/**
+ * @brief Reads the named members of a local struct type into @p out
+ *
+ * A member may be a path into nested structs (e.g. `version.major`). Kinds
+ * follow the member type:
+ * - `F_FN`: function pointer
+ * - `F_CSTR`: pointer to string
+ * - `F_PTR`: regular pointer
+ * - `F_STR`: array
+ * - `F_INT`: anything else
+ *
+ * @param type          Struct name in the local types
+ * @param members       Member names or paths
+ * @param n             Number of @p members
+ * @param out           Receives the layout
+ * @param expected_size Required struct size in bytes, 0 to skip the check
+ * @param require_all   A missing member fails the load; otherwise it is skipped
+ * @return false on failure or if no field was loaded
+ */
 inline bool load_layout(const char* type, const char* const* members, size_t n,
 	layout_t& out, int expected_size = 0, bool require_all = true) {
 	tinfo_t t;
@@ -100,13 +124,19 @@ inline bool load_layout(const char* type, const char* const* members, size_t n,
 	return !out.fields.empty();
 }
 
+/**
+ * @brief load_layout() for a static array of member names
+ */
 template <size_t N>
 bool load_layout(const char* type, const char* const (&members)[N],
 	layout_t& out, int expected_size = 0, bool require_all = true) {
 	return load_layout(type, members, N, out, expected_size, require_all);
 }
 
-// Members of t at base, nested structs flattened into dotted paths
+/**
+ * @brief Appends the members of @p t at @p base to @p out, nested structs
+ * flattened into dotted paths
+ */
 inline void flatten_members(
 	const tinfo_t& t, const qstring& prefix, int64 base, layout_t& out) {
 	udt_type_data_t udt;
@@ -128,11 +158,12 @@ inline void flatten_members(
 	}
 }
 
-/*
-	Every member of a local struct type, so the layout follows the type decl
-	with no member list to keep in sync. Nested structs are flattened into
-   dotted paths
-*/
+/**
+ * @brief Reads every member of a local struct type
+ *
+ * The layout follows the type declaration with no member list to keep in
+ * sync. Nested structs are flattened into dotted paths.
+ */
 inline bool load_layout(const char* type, layout_t& out) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
@@ -148,6 +179,13 @@ inline bool load_layout(const char* type, layout_t& out) {
 	return !out.fields.empty();
 }
 
+/**
+ * @brief Finds a member of type @p target inside @p ti, searching nested structs
+ *
+ * @param base  Offset of @p ti in the outer struct
+ * @param off   Receives the byte offset of the first match
+ * @return false if there is none (search depth is limited)
+ */
 inline bool find_embedded(const tinfo_t& ti, const tinfo_t& target, int64 base,
 	int64& off, int depth = 0) {
 	udt_type_data_t u;

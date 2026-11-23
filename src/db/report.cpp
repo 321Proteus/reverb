@@ -1,9 +1,15 @@
+/**
+ * @file report.cpp
+ * @brief Report serialization into a netnode blob.
+ */
 #include "report.hpp"
 #include <netnode.hpp>
 
 namespace rv {
 
+/** @brief Netnode holding the report */
 static constexpr const char* NODE = "$ reverb.report";
+/** @brief Blob format version; other versions are ignored on load */
 static constexpr uchar VERSION = 2;
 
 void store_report(const std::vector<report::report_entry_t>& es) {
