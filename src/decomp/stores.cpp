@@ -1,3 +1,7 @@
+/**
+ * @file stores.cpp
+ * @brief Address folding and constant store collection, see stores.hpp.
+ */
 #include "decomp/stores.hpp"
 #include "decomp/sse.hpp"
 #include "decomp/analysis.hpp"
