@@ -1,27 +1,40 @@
 #pragma once
 
+/**
+ * @file call.hpp
+ * @brief Calls and their arguments as read from the ctree.
+ */
+
 #include "ctree.hpp"
 #include <hexrays.hpp>
 #include <vector>
 
 namespace rv {
 
-// One call argument
+/**
+ * @brief One call argument
+ */
 struct call_arg_t {
 	enum kind_t { NONE, NUM, OBJ, VAR, STR } k = NONE;
-	uint64 num = 0;	   // for NUM
-	ea_t ea = BADADDR; // for OBJ: the global's address
-	int var = -1;	   // for VAR: lvar index
-	bool ref = false;  // is it a &x
-	qstring str;	   // for STR: the literal text
+	uint64 num = 0;	   /**< For NUM */
+	ea_t ea = BADADDR; /**< For OBJ: the global's address */
+	int var = -1;	   /**< For VAR: lvar index */
+	bool ref = false;  /**< Is it a `&x` */
+	qstring str;	   /**< For STR: the literal text */
 };
 
+/**
+ * @brief A call site and its arguments
+ */
 struct call_t {
-	ea_t ea = BADADDR;	   // call site
-	ea_t callee = BADADDR; // BADADDR for indirect calls
+	ea_t ea = BADADDR;	   /**< Call site */
+	ea_t callee = BADADDR; /**< BADADDR for indirect calls */
 	std::vector<call_arg_t> args;
 };
 
+/**
+ * @brief Classifies the argument expression @p a, looking through casts and `&`
+ */
 inline call_arg_t read_call_arg(cexpr_t* a) {
 
 	call_arg_t r;
@@ -61,9 +74,11 @@ inline call_arg_t read_call_arg(cexpr_t* a) {
 	return r;
 }
 
-// Every call in a subtree, in visit order
+/**
+ * @brief Collects every call in a subtree, in visit order
+ */
 struct call_collector_t : public ctree_visitor_t {
-	std::vector<call_t> calls;
+	std::vector<call_t> calls; /**< Calls found, nested ones included */
 
 	call_collector_t() : ctree_visitor_t(CV_FAST) {}
 
