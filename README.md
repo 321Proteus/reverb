@@ -130,8 +130,6 @@ VST2 type declarations are not generated - please read the note in `src/formats/
 
 Issues and pull requests are welcome. If you find a plugin binary that REverb mislabels or fails on, you can send the sample (or describe the problem) together with the `[REverb]` log output.
 
-Builds CI uses an IDA SDK download key, so builds of pull requests from forks are skipped by default and set up by the maintainer.
-
 ### On AI usage
 
 The Python parts of the project (declgens (with an exception to VST2, which decls have been written manually) and some parts of `test/test.py`) have been created strictly by "vibe-coding" -  with a locally-running Qwen3.8-27B AI model working in agent mode. I also used Claude Opus and Sonnet 5.5 in some parts of the code, for example CLAP ID scanning and vtable reconstruction, but it was mostly chat-mode assistance.
