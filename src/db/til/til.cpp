@@ -17,13 +17,15 @@
 
 namespace rv::til {
 
-/** @brief The ABI the type libraries are built for, nullptr if there are none */
+/** @brief The ABI the type libraries are built for, nullptr if there are none
+ */
 static const char* get_til_abi() {
 	if (inf_get_filetype() != f_PE) return nullptr;
 	return inf_is_64bit() ? "msvc64" : "msvc32";
 }
 
-/** @brief Collects the til files matching a request while IDA walks a directory */
+/** @brief Collects the til files matching a request while IDA walks a directory
+ */
 struct scanner_t : file_enumerator_t {
 	std::string name;
 	std::string abi;

@@ -7,8 +7,8 @@
 /**
  * @brief Bytes written by a store intrinsic named @p n, or 0
  *
- * The upper-half stores (`_mm_storeh_*`) write at p, but not the low half of the
- * value, so they are not modelled.
+ * The upper-half stores (`_mm_storeh_*`) write at p, but not the low half of
+ * the value, so they are not modelled.
  */
 static int store_size(const char* n) {
 	for (const char* w : { "_mm_store_si128", "_mm_storeu_si128",

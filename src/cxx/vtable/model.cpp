@@ -12,7 +12,8 @@
 
 /**
  * @file model.cpp
- * @brief Vtable model: collection, owner resolution and naming of slot functions.
+ * @brief Vtable model: collection, owner resolution and naming of slot
+ * functions.
  */
 namespace rv::vtbl {
 
