@@ -10,17 +10,26 @@
 #include <set>
 #include <vector>
 
-// Vtables in decompiled code: stores in constructors and virtual calls
+/**
+ * @file hexrays.hpp
+ * @brief Vtables in decompiled code: stores in constructors and virtual calls.
+ */
 namespace rv::vtbl {
 
-/*
-  &Plugin::`vftable'            (MSVC)
-  &off_1234                    (stripped, address point already labeled)
-  (char *)&`vtable for'X + 16  (Itanium: offset-to-top and RTTI come first)
-*/
+/**
+ * @brief Vtable address point referenced by expression @p e, or BADADDR
+ *
+ * Recognized forms:
+ * - ``&Plugin::`vftable'`` (MSVC)
+ * - `&off_1234` (stripped, address point already labeled)
+ * - ``(char *)&`vtable for'X + 16`` (Itanium: offset-to-top and RTTI come
+ * first)
+ */
 ea_t ref(cexpr_t* e);
 
-// Stores of a vtable into an object: *(this + off) = vtable
+/**
+ * @brief Finds stores of a vtable into an object: `*(this + off) = vtable`
+ */
 struct store_finder_t : public ctree_visitor_t {
 	struct hit_t {
 		sval_t this_offset;
@@ -29,7 +38,7 @@ struct store_finder_t : public ctree_visitor_t {
 		ea_t ctor_ea = BADADDR; // set by callers that search constructors
 	};
 
-	std::vector<hit_t> hits; // in source visit order
+	std::vector<hit_t> hits; /**< In source visit order */
 
 	store_finder_t() : ctree_visitor_t(CV_FAST) {}
 
@@ -48,38 +57,48 @@ struct store_finder_t : public ctree_visitor_t {
 	}
 };
 
-/*
-	Vptr stores into var by subobject offset, the last store per offset wins.
-	Only valid for constructors: base constructors store first and the class
-	overwrites. Destructors store in the opposite order.
-*/
+/**
+ * @brief Vptr stores into local @p var by subobject offset
+ *
+ * The last store per offset wins. Only valid for constructors: base
+ * constructors store first and the class overwrites. Destructors store in the
+ * opposite order.
+ */
 std::map<sval_t, ea_t> ctor_vtables(cfunc_t* cf, int var);
 
-// The last vtable stored at this+0 is function constructs
+/**
+ * @brief The vtable stored last at `this+0`, i.e. the class the function
+ * constructs
+ */
 ea_t ctor_vtable(cfunc_t* cf, int this_var);
 
-// Function in a vtable slot, through thunks
+/**
+ * @brief Function in slot @p slot of @p vt, through thunks, or BADADDR
+ */
 inline ea_t slot_func(ea_t vt, int slot) {
 	if (vt == BADADDR || slot < 0) return BADADDR;
 	const ea_t t = read_slot(vt, size_t(slot));
 	return is_code_addr(t) ? resolve_thunk(t) : BADADDR;
 }
 
-/*
-	fn fills a single slot of vt. A stub that the linker merged for several
-	methods (an empty one, return 0) fills more, and implements none of them
-	in particular
-*/
+/**
+ * @brief Whether @p fn fills a single slot of @p vt
+ *
+ * A stub that the linker merged for several methods (an empty one, return 0)
+ * fills more, and implements none of them in particular.
+ */
 bool unique_slot(ea_t vt, ea_t fn);
 
 } // namespace rv::vtbl
 
 namespace rv {
 
-// Looks for direct calls whose first argument is a local or &local
-// (potential constructors)
+/**
+ * @brief Finds direct calls whose first argument is a local or `&local`
+ * (potential constructors)
+ */
 struct ctor_candidate_finder_t : public ctree_visitor_t {
-	std::vector<ea_t> candidates;
+	std::vector<ea_t> candidates; /**< Callee addresses */
 
 	ctor_candidate_finder_t() : ctree_visitor_t(CV_FAST) {}
 
@@ -101,14 +120,16 @@ struct ctor_candidate_finder_t : public ctree_visitor_t {
 	}
 };
 
-/*
-	Tracks the locals that hold one object (objvars), its vtable (vtvars) and
-	methods loaded from it (fnvars), and finds virtual calls for it. Pointers
-	reached through the fields (parts) are other objects, e.g. a
-	wrapper's plugin member: calls on them are followed but the vtable doesnt
-	matter. With vptrs filled, fields at those offsets are secondary vptrs of
-	the same object, and calls through them use that vtable.
-*/
+/**
+ * @brief Tracks one object through a function and finds virtual calls on it
+ *
+ * Follows the locals that hold the object (objvars), its vtable (vtvars) and
+ * methods loaded from it (fnvars).
+ * Pointers reached through the fields (parts) are other objects, e.g. a
+ * wrapper's plugin member: calls on them are followed but the vtable doesn't
+ * matter. With vptrs filled, fields at those offsets are secondary vptrs of
+ * the same object, and calls through them use that vtable.
+ */
 struct obj_tracker_t {
 
 	std::set<int> objvars;
@@ -121,7 +142,7 @@ struct obj_tracker_t {
 	ea_t vtable = BADADDR;
 	std::map<sval_t, ea_t> vptrs; // optional: subobject offset -> vtable
 
-	// vptr offsets of vtvars/fnvars, absent = 0 (primary)
+	/** vptr offsets of vtvars/fnvars, absent = 0 (primary) */
 	std::map<int, sval_t> var_vptr;
 
 	bool is_object(cexpr_t* e) const {
@@ -133,7 +154,10 @@ struct obj_tracker_t {
 		return src_var >= 0 && is_load_of(e, src_var, src_off);
 	}
 
-	// *obj, obj->vfptr, a secondary vptr from vptrs or a local holding one
+	/**
+	 * @brief Whether @p e is `*obj`, `obj->vfptr`, a secondary vptr from vptrs
+	 * or a local holding one; @p off receives its subobject offset
+	 */
 	bool vptr_of(cexpr_t* e, sval_t& off) const;
 
 	bool is_vtable(cexpr_t* e) const {
@@ -141,37 +165,51 @@ struct obj_tracker_t {
 		return vptr_of(e, off);
 	}
 
-	/*
-		Pointer reached through the object: obj->field, *(obj + k), &obj->m,
-		obj + k, recursively. Never the object or its vptrs (*obj).
-	*/
+	/**
+	 * @brief Whether @p e is a pointer reached through the object:
+	 * `obj->field`, `*(obj + k)`, `&obj->m`, `obj + k`, recursively
+	 *
+	 * Never the object or its vptrs (`*obj`).
+	 */
 	bool is_part(cexpr_t* e) const;
 
-	// vX = obj / *obj / (*obj)[n] / obj->field call for every assignment
+	/**
+	 * @brief Updates the tracked locals from an assignment: `vX = obj` / `*obj`
+	 * /
+	 * `(*obj)[n]` / `obj->field`. Call for every assignment
+	 */
 	void absorb(cexpr_t* asg);
 
-	/*
-		Slot called by a virtual call:
-		(*(fn **)(*(_QWORD *)obj + 8))(obj, ...)	byte offset
-		(*((fn **)*obj + 1))(obj, ...)				scaled pointer arithmetic
-		v7 = *obj; v7[1](obj, ...)					index into a vtable local
-		v8 = *(*obj + 8); v8(obj, ...)				method local
-		obj->vfptr->member(...)						typed vtable
-		The vtable itself must come from the object, which rejects plain
-		function pointer fields such as obj->callback(). vptr_off receives the
-		subobject offset of the vptr used (0 = primary).
-	*/
+	/**
+	 * @brief Slot called by a virtual call, if @p callee is one
+	 *
+	 * Forms:
+	 *
+	 * - `(*(fn **)(*(_QWORD *)obj + 8))(obj, ...)`: byte offset
+	 * - `(*((fn **)*obj + 1))(obj, ...)`: scaled pointer arithmetic
+	 * - `v7 = *obj; v7[1](obj, ...)`: index into a vtable local
+	 * - `v8 = *(*obj + 8); v8(obj, ...)`: method local
+	 * - `obj->vfptr->member(...)`: typed vtable
+	 *
+	 * The vtable itself must come from the object, which rejects plain function
+	 * pointer fields such as `obj->callback()`. @p vptr_off receives the
+	 * subobject offset of the vptr used (0 = primary).
+	 */
 	bool vcall_slot(
 		cexpr_t* callee, int& slot, sval_t* vptr_off = nullptr) const;
 
-	// Vtable of the subobject at off
+	/**
+	 * @brief Vtable of the subobject at @p off
+	 */
 	ea_t vtable_at(sval_t off) const {
 		auto it = vptrs.find(off);
 		if (it != vptrs.end()) return it->second;
 		return off == 0 ? vtable : BADADDR;
 	}
 
-	// Virtual call target, BADADDR if not virtual
+	/**
+	 * @brief Virtual call target, BADADDR if not virtual
+	 */
 	ea_t vcall_target(cexpr_t* callee) const {
 		int slot;
 		sval_t off;
@@ -181,27 +219,32 @@ struct obj_tracker_t {
 	}
 };
 
-/*
-	The method a function that only forwards calls virtually on the object it
-	reaches through an argument, e.g. a VST2 callback:
-	(*(*effect->object + 344))(effect->object, ...). obj.src_off and
-	obj.vtable describe the object, src_var is filled
-*/
+/**
+ * @brief The method that a function only forwards to virtually, on the object
+ * it reaches through an argument, e.g. a VST2 callback:
+ * `(*(*effect->object + 344))(effect->object, ...)`
+ *
+ * obj.src_off and obj.vtable describe the object, src_var is filled.
+ */
 ea_t virtual_tail_callee(ea_t fn, obj_tracker_t obj);
 
 } // namespace rv
 
 namespace rv::vtbl {
 
-/*
-	Classes constructed on top of ctor_ea: callers that pass their own this
-	to it and then store a vtable of their own are derived constructors. The
-	ends of these chains are the most derived classes; there are several in
-	shell plugins.
-*/
+/**
+ * @brief Collects the classes constructed on top of @p ctor_ea into @p out
+ *
+ * Callers that pass their own this to @p ctor_ea and then store a vtable of
+ * their own are derived constructors. The ends of these chains are the most
+ * derived classes; there are several in shell plugins.
+ */
 void ctor_chain_leaves(
 	ea_t ctor_ea, int depth, std::set<ea_t>& seen, std::vector<ea_t>& out);
 
+/**
+ * @brief Constructors at the ends of the chains above @p ctor_ea
+ */
 inline std::vector<ea_t> most_derived(ea_t ctor_ea, int depth = 4) {
 	std::vector<ea_t> out;
 	std::set<ea_t> seen;
