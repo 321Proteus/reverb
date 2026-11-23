@@ -9,25 +9,37 @@ Audio plugins are shared objects, mostly written in C and C++ (although Rust and
 
 ## Features
  - **Plugin interface detection** from the exported symbols
- - **Type declarations** from the official SDKs
  - **Object labeling** Entry points, factory objects, vtables, plugin descriptors, you name it.
  - **Plugin framework identification** from strings and RTTI signatures for JUCE, DPF and iPlug2
+ - **Type declarations** from the official SDKs and the JUCE plugin framework
 
 ## Requirements
 
 - IDA 9.2 or higher **with the Hex-Rays decompiler** for the database's architecture
 
+## Framework type libraries (optional)
+
+For a detected plugin, REverb can load the types of the matching format and framework version to the database into the local types in two ways. Format types are served as IDA type library modules or generated resources from each applicable `src/formats`' `types.h` and matching `.inc` tables (such as `iids.inc` in VST3). The framework declarations are only distributed using TIL libraries.
+
+The TILs are a separate download from the Releases page. To use them, extract the archive into the `til` directory of your IDA user directory (`~/.idapro/til` or `%APPDATA%\Hex-Rays\IDA Pro\til`). The libraries land in `til/pc`, where IDA looks for x86/x64 type libraries:
+
+```sh
+tar -xJf reverb-tils-<date>.tar.xz -C ~/.idapro/til
+```
+
+Without them REverb works as before and logs that they are not installed. The library is picked by the detected version: the newest one that is not newer than it (a newer JUCE gets the newest library, with a warning)
+
 ## Development and building from source
 
 A few additional tools are required:
 - IDA SDK for your preferred IDA version:
-    - **SDK 9.4 and newer** ships its own CMake layout (`cmake/idasdk_init.cmake`), and
-    REverb uses it.
+    - **SDK 9.4 and newer** ships its own CMake layout (`cmake/idasdk_init.cmake`), and  REverb uses it.
     - **Older SDKs** need [`allthingsida/ida-cmake`](https://github.com/allthingsida/ida-cmake)
     cloned into the SDK root as `ida-cmake/`; REverb looks for `ida-cmake/bootstrap.cmake`.
 - CMake 3.25 or higher
 - A modern C++ compiler for your platform
 - Recent Python and pip (for decl generation and tests)
+- Docker (for TIL generation)
 - Clang 21 or higher for clang-format
 
 ```sh
@@ -59,6 +71,7 @@ The name "test" is misleading here, because it doesn't actually check anything, 
 my plugin library. It also requires a licensed IDA and therefore is not ran by CI.
 
 ## To Do (planned):
+ - Figure out how to do type declarations for other frameworks, like DPF and iPlug2 - they don't have typical release cycles, just a steady stream of commits
  - Create a minimal plugin host that uses format and framework detection results to automatically set breakpoints
  at interesting functions and integrate it with the IDA debug ecosystem
  - Recursively taint functions accessing pointers to audio signal data provided by the host (e.g. `process()` in VST3),
@@ -68,9 +81,6 @@ my plugin library. It also requires a licensed IDA and therefore is not ran by C
 
 
 ### Regenerating the type declarations
-
-The SDK type declarations REverb loads into IDA are generated resources from each applicable `src/formats`' `types.h` and matching `.inc` tables (such as `iids.inc` in VST3). The plugin build only embeds them, so you only need this when an
-SDK is updated.
 
 ```sh
 pip install libclang
@@ -87,8 +97,31 @@ python3 tools/clap_decls.py --sdk clap \
     --types src/formats/clap/types.h \
     --exts src/formats/clap/exts.inc
 
-cmake -B build -S .  # reconfigure to embed the new files
+# reconfigure to embed the new files
+cmake -B build -S .
+
+# Format & framework TILs, built in a Docker container
+cd tools/tilgen
+
+# Paths used by run.sh (these are the defaults)
+export TILGEN_IDA=/opt/ida-pro          # a licensed IDA, run once by this user
+export TILGEN_SDKS=~/Source/rv_sdks     # holds JUCE/ (git clone), vst3sdk/, clap/, VST_SDK_2.X/
+export TILGEN_XWIN=~/xwin/splat         # Windows SDK + CRT headers (`xwin splat`), for msvc ABIs
+export TILGEN_IMAGE=reverb-tilgen       # the Docker image name
+
+# One run per ABI (itanium64|msvc64|msvc32) (--source all|formats|juce)
+# --raw stores the tils without IDA's zlib, so the final archive compresses better
+./run.sh docker --abi itanium64 --source all --raw --force -j 4 --out ../../build/tils-final
+
+# Pack the libraries into a release archive (optional)
+./package.sh --input ../../build/tils-final --output ../../build/reverb-tils.tar.xz
 ```
+
+`run.sh docker` builds the image from `tools/tilgen/Dockerfile` (GCC 12 and Debian 12 headers) on every run, only the first one takes a while.
+It mounts IDA, the SDKs and the xwin headers read-only and the repository read-write, so `--out` must be inside the repository.
+IDA's license is taken from `~/.idapro/ida.reg`, which is why IDA must have been started once by the same user. Pick `-j` for your machine: each job can use 1-2 GB of RAM.
+
+Each til is parsed in its own process with `tools/tilgen/quarantine.c` preloaded. It delays `free()`, which works around a use-after-free in IDA 9.4's clang parser that otherwise crashes it on JUCE 7.0.6 and newer (and 7.0.3 on MSVC).
 
 Each generator re-parses its own output for every target ABI and compares struct sizes, field offsets and (for CLAP) field types and enum constants against the source headers.
 VST2 type declarations are not generated - please read the note in `src/formats/vst2/types.h`.

@@ -1,0 +1,316 @@
+"""python -m tilgen [--db PE] [--source formats|juce|all] [--refs A,B]
+[--abi msvc64] [--force] [-j N]. Each til is built by its own child process,
+on its own copy of the database (idalib locks the file); -j runs N at once.
+Without --db a dummy executable is built into build/dummy/."""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from . import core
+from .formats import Formats
+from .juce import Juce
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tilgen")
+
+    ap.add_argument(
+        "--db",
+        help="Any small binary of the target ABI (default: a dummy built "
+        "into build/dummy/ with a compiler found for the ABI)"
+    )
+
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=1,
+        help="tils built at the same time"
+    )
+
+    ap.add_argument("--entry-out", help=argparse.SUPPRESS)
+    ap.add_argument("--log", help=argparse.SUPPRESS)
+
+    ap.add_argument(
+        "--source",
+        default="all",
+        choices=("formats", "juce", "all")
+    )
+
+    ap.add_argument(
+        "--refs",
+        help="Comma list of versions/tags (juce)"
+    )
+
+    ap.add_argument(
+        "--abi",
+        default="msvc64",
+        choices=sorted(core.ABIS)
+    )
+
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild existing"
+    )
+
+    ap.add_argument(
+        "--full",
+        action="store_true",
+        help="keep the full til (default: the SDK's own types and their references)"
+    )
+
+    ap.add_argument(
+        "--inprocess",
+        action="store_true",
+        help="build in this process (default: one child process "
+        "per til, so a parser crash costs one til, not the run)"
+    )
+
+    ap.add_argument(
+        "--sdks",
+        help="path to the directory containing the selected SDKs",
+        default=str(Path.home() / "Source/rv_sdks")
+    )
+
+
+    ap.add_argument(
+        "--only",
+        help="juce: parse only these wrapper TUs (vst3, vst2; comma list); "
+        "the til is named <tag>-vst2-only.til"
+    )
+
+    ap.add_argument(
+        "--vst3",
+        help="a VST3 SDK root holding pluginterfaces/ "
+        "(default: <sdks>/vst3sdk)"
+    )
+
+    ap.add_argument(
+        "--sys-include",
+        action="append",
+        default=[],
+        help="extra system include dir (-I), repeatable"
+    )
+
+    ap.add_argument(
+        "--xwin",
+        default=str(Path.home() / "xwin/splat")
+    )
+
+    ap.add_argument(
+        "--cxx",
+        default="g++",
+        help="GNU ABIs: the C++ compiler whose libstdc++ and system headers "
+        "are parsed (its include dirs become the --sys-include default); it "
+        "must be the newest GCC on the system, see tools/tilgen/run.sh"
+    )
+
+    ap.add_argument(
+        "--raw",
+        action="store_true",
+        help="store tils without IDA's zlib (TIL_ZIP): ~8x larger, but an "
+        "archive of all versions then compresses across them"
+    )
+
+    ap.add_argument(
+        "--no-quarantine",
+        action="store_true",
+        help="children run without tilgen/holdfree.c preloaded (it delays "
+        "free(), which keeps IDA's parser from crashing on JUCE 7.0.6+)"
+    )
+
+    ap.add_argument(
+        "--out",
+        default=str(core.OUT_ROOT)
+    )
+
+    ap.add_argument(
+        "--clang-log",
+        help="comma list of IDA clang parser logs to turn on, into each "
+        "til's log: " + ",".join(core.CLANG_LOGS)
+    )
+
+    a = ap.parse_args()
+    a.clang_logs = tuple(a.clang_log.upper().split(",")) if a.clang_log else ()
+    bad_logs = set(a.clang_logs) - set(core.CLANG_LOGS)
+    if bad_logs:
+        ap.error(f"unknown --clang-log {sorted(bad_logs)}")
+    out = Path(a.out)
+    sources = []
+
+    a.toolchain = None
+    if not core.ABIS[a.abi].windows:
+        a.toolchain = core.check_gcc(a.cxx)
+        if not a.sys_include:
+            a.sys_include = core.host_includes(a.cxx)
+
+    if a.source in ("formats", "all"):
+        sources.append(Formats(a.sdks, a.xwin, a.vst3, a.sys_include))
+    if a.source in ("juce", "all"):
+        sources.append(Juce(a.sdks, a.xwin, a.sys_include,
+                          a.only.split(",") if a.only else ()))
+
+    log = lambda s: print(s, flush=True)
+    if not a.db:
+        a.db = str(core.ensure_db(a.abi))
+    if not a.inprocess:
+        sys.exit(run_children(a, sources, out, log))
+
+    sess = core.Session(a.db, a.log or out / "tilgen.log", a.clang_logs,
+                        zip_tils=not a.raw)
+    sess.require_bits(a.abi)
+    sess.use_compiler(a.abi)
+
+    entries = core.load_manifest(out)
+    bad = 0
+
+    try:
+        for src in sources:
+            for ver in pick_versions(a, src):
+
+                lab = src.label(ver)
+                path = src.out_path(out, lab, a.abi)
+                log(f"[{src.name} {lab} {a.abi}]")
+                plan = src.plan(ver, a.abi)
+
+                try:
+                    e = core.build_one(sess, src.name, lab, a.abi, plan, path, log,
+                                    src.title(lab, a.abi), a.full)
+                finally:
+                    shutil.rmtree(plan.workdir, ignore_errors=True)
+                if a.toolchain:
+                    e["toolchain"] = a.toolchain
+
+                log(f"  {e['status']}: {e['types']} types, {e['errors']} errors "
+                    f"({e['errors_outside_rtti']} not rtti), "
+                    f"{e['bytes'] // 1024} KB, {e['std']}, {e['seconds']}s")
+
+                for p in e["problems"]:
+                    log(f"  PROBLEM {p}")
+
+                bad += e["status"] != "ok"
+                if a.entry_out:     # the parent merges them into the manifest
+                    Path(a.entry_out).write_text(json.dumps(e))
+                else:
+                    entries = core.upsert(entries, e)
+                    core.save_manifest(entries, out)
+
+    finally:
+        sess.close()
+
+    sys.exit(1 if bad else 0)
+
+
+def pick_versions(a, src):
+    versions = src.versions()
+
+    if a.refs and src.name == "juce":
+        want = a.refs.split(",")
+        missing = set(want) - set(versions)
+
+        if missing:
+            sys.exit(f"unknown refs: {sorted(missing)}")
+
+        versions = [v for v in versions if v in want]
+
+    return versions
+
+
+def run_children(a, sources, out, log):
+    """One `--inprocess` child per til, on its own copy of the database, up to
+    -j at once. IDA's clang crashes on some JUCE tags; the parent notes the
+    crash in the manifest and goes on. Only the parent writes the manifest."""
+    lock = threading.Lock()
+    state = {"entries": core.load_manifest(out), "bad": 0}
+    env = dict(os.environ)
+    if not a.no_quarantine:
+        pre = env.get("LD_PRELOAD")
+        env["LD_PRELOAD"] = str(core.holdfree()) + (f":{pre}" if pre else "")
+    jobs = []
+
+    for src in sources:
+        for ver in pick_versions(a, src):
+            lab = src.label(ver)
+            path = src.out_path(out, lab, a.abi)
+            if path.exists() and not a.force:
+                log(f"[{src.name} {lab}] exists, skipped")
+                continue
+            jobs.append((src, ver, lab))
+
+    def run(job):
+        src, ver, lab = job
+        tmp = Path(tempfile.mkdtemp(prefix="tilgen_db_"))
+        try:
+            db = tmp / Path(a.db).name
+            shutil.copy2(a.db, db)
+            entry = tmp / "entry.json"
+            logf = out / "logs" / f"{src.name}-{lab}-{a.abi}.log"
+            logf.parent.mkdir(parents=True, exist_ok=True)
+
+            cmd = [sys.executable, "-m", "tilgen", "--db", str(db),
+                   "--source", src.name, "--refs", ver, "--abi", a.abi,
+                   "--sdks", a.sdks, "--xwin", a.xwin, "--out", str(out),
+                   "--cxx", a.cxx,
+                   "--inprocess", "--entry-out", str(entry),
+                   "--log", str(logf)]
+            if a.vst3:
+                cmd += ["--vst3", a.vst3]
+            if a.only:
+                cmd += ["--only", a.only]
+            if a.full:
+                cmd += ["--full"]
+            if a.raw:
+                cmd += ["--raw"]
+            if a.clang_log:
+                cmd += ["--clang-log", a.clang_log]
+            for d in a.sys_include:
+                cmd += ["--sys-include", d]
+
+            p = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[1],
+                               capture_output=True, text=True, env=env)
+            rc = p.returncode
+            lines = p.stdout.splitlines()
+            if rc not in (0, 1):    # 1: ran, anchors failed (in the output)
+                what = "crash" if rc < 0 else "error"
+                lines.append(f"  {what.upper()}: child exited {rc}"
+                             f"{' (signal %d)' % -rc if rc < 0 else ''}")
+                lines += p.stderr.splitlines()[-6:]
+                e = {"source": src.name, "version": lab, "abi": a.abi,
+                     "status": what, "returncode": rc, "types": 0,
+                     "errors": 0, "bytes": 0}
+                if a.toolchain:
+                    e["toolchain"] = a.toolchain
+            else:
+                e = json.loads(entry.read_text()) if entry.exists() else None
+            with lock:
+                log("\n".join(lines))
+                if e:
+                    state["entries"] = core.upsert(state["entries"], e)
+                    core.save_manifest(state["entries"], out)
+                state["bad"] += rc != 0
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+        list(ex.map(run, jobs))
+
+    return 1 if state["bad"] else 0
+
+
+try:
+    main()
+except SystemExit:
+    raise
+except BaseException:     # an exception must not look like "anchors failed"
+    import traceback
+    traceback.print_exc()
+    sys.exit(3)

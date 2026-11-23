@@ -8,5 +8,8 @@ target_sources(reverb PRIVATE
     report.hpp
     refs.hpp
     segments.hpp
+    type_name.hpp
     types.hpp
 )
+
+add_subdirectory(til)

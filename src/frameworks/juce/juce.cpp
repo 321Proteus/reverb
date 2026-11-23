@@ -38,6 +38,6 @@ static qstring detect_version() {
 }
 
 extern const FrameworkModule module = { nullptr, signals, std::size(signals),
-	&detect_version, nullptr };
+	&detect_version, nullptr, "juce" };
 
 } // namespace rv::juce

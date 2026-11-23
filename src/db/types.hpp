@@ -69,7 +69,8 @@ inline bool load_layout(const char* type, const char* const* members, size_t n,
 	layout_t& out, int expected_size = 0, bool require_all = true) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
-		rv_log("%s not found in local types - was types.h parsed?", type);
+		rv_log("%s not found in local types - was the type declaration parsed?",
+			type);
 		return false;
 	}
 
@@ -135,7 +136,8 @@ inline void flatten_members(
 inline bool load_layout(const char* type, layout_t& out) {
 	tinfo_t t;
 	if (!t.get_named_type(get_idati(), type) || !t.is_struct()) {
-		rv_log("%s not found in local types - was types.h parsed?", type);
+		rv_log("%s not found in local types - was the type declaration parsed?",
+			type);
 		return false;
 	}
 
@@ -144,6 +146,29 @@ inline bool load_layout(const char* type, layout_t& out) {
 
 	flatten_members(t, qstring(), 0, out);
 	return !out.fields.empty();
+}
+
+inline bool find_embedded(const tinfo_t& ti, const tinfo_t& target, int64 base,
+	int64& off, int depth = 0) {
+	udt_type_data_t u;
+	if (depth > 8 || !ti.get_udt_details(&u)) return false;
+
+	for (const udm_t& m : u) {
+		int64 k = base + int64(m.offset / 8);
+
+		tinfo_t mt = m.type;
+		mt.clr_const();
+
+		if (mt.equals_to(target)) {
+			off = k;
+			return true;
+		}
+
+		if (mt.is_struct()) {
+			if (find_embedded(mt, target, k, off, depth + 1)) return true;
+		}
+	}
+	return false;
 }
 
 } // namespace rv

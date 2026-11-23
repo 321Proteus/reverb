@@ -41,6 +41,14 @@ bool fold_addr(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 		return true;
 	}
 
+	// array member decay to its own address
+	case cot_memref:
+	case cot_memptr:
+	case cot_idx:	 {
+		int sz;
+		return e->type.is_array() && fold_lvalue(e, alias, out, sz);
+	}
+
 	case cot_ref: { // &a1->field, &a1[3]
 		int sz;
 		return fold_lvalue(e->x, alias, out, sz);
@@ -67,6 +75,14 @@ bool fold_idx(cexpr_t* e, const alias_map_t* alias, loc_t& out) {
 	return true;
 }
 
+static bool fold_object(cexpr_t* e, const alias_map_t* a, loc_t& out) {
+	e = strip_casts(e);
+
+	if (e->op == cot_var) return fold_addr(e, a, out); // the local itself
+	int sz;
+	return fold_lvalue(e, a, out, sz);
+}
+
 bool fold_lvalue(cexpr_t* e, const alias_map_t* alias, loc_t& out, int& size) {
 	e = strip_casts(e);
 	if (e == nullptr) return false;
@@ -75,16 +91,26 @@ bool fold_lvalue(cexpr_t* e, const alias_map_t* alias, loc_t& out, int& size) {
 		size = e->ptrsize;
 		return true;
 	}
+
 	if (e->op == cot_memptr && fold_addr(e->x, alias, out)) {
 		out.off += e->m;
 		size = e->ptrsize;
 		return true;
 	}
+
+	if (e->op == cot_memref && fold_object(e->x, alias, out)) {
+		out.off += e->m;
+		const size_t s = e->type.get_size();
+		size = s == BADSIZE ? 0 : int(s);
+		return true;
+	}
+
 	if (e->op == cot_idx && fold_idx(e, alias, out)) { // a1[22]
 		const size_t es = e->type.get_size();
 		size = es == BADSIZE ? 0 : int(es);
 		return true;
 	}
+
 	return false;
 }
 
