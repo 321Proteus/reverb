@@ -5,6 +5,7 @@
 #include "decomp/ctree.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/stores.hpp"
+#include <algorithm>
 #include <map>
 
 namespace rv {
@@ -18,12 +19,15 @@ static cexpr_t* cmp_operand(cexpr_t* c, bool& in_then) {
 	if (c->op == cot_lnot) {
 		in_then = true;
 		c = strip_casts(c->x);
+
 	} else if (c->op == cot_eq || c->op == cot_ne) {
 		cexpr_t* z = strip_casts(c->y);
 		if (z->op != cot_num || z->numval() != 0) return nullptr;
+
 		in_then = c->op == cot_eq;
 		c = strip_casts(c->x);
 	}
+
 	return c->op == cot_call || c->op == cot_var ? c : nullptr;
 }
 
@@ -129,10 +133,80 @@ struct inline_cmp_finder_t : public ctree_visitor_t {
 	}
 };
 
+struct cmp_var_t {
+	qstring id;
+	bool match_nonzero = false;
+};
+
+struct cmp_var_finder_t : public ctree_visitor_t {
+	const std::set<int>& vars;
+	std::map<int, cmp_var_t> found;
+
+	cmp_var_finder_t(const std::set<int>& v)
+		: ctree_visitor_t(CV_FAST), vars(v) {}
+
+	int idaapi visit_expr(cexpr_t* e) override {
+		if (e->op != cot_asg) return 0;
+		cexpr_t* l = strip_casts(e->x);
+		if (l->op != cot_var) return 0;
+
+		cmp_var_t c;
+		cexpr_t* r = strip_casts(e->y);
+		if (r->op == cot_eq || r->op == cot_ne) {
+			cexpr_t* z = strip_casts(r->y);
+			if (z->op != cot_num || z->numval() != 0) return 0;
+
+			c.match_nonzero = r->op == cot_eq;
+			r = strip_casts(r->x);
+		}
+
+		if (r->op == cot_call && arg_pos(r, vars) >= 0 && literal_arg(r, c.id))
+			found[l->v.idx] = c;
+		return 0;
+	}
+};
+
+struct var_writer_t : public ctree_visitor_t {
+	int var;
+	bool found = false;
+
+	var_writer_t(int v) : ctree_visitor_t(CV_FAST), var(v) {}
+
+	int idaapi visit_expr(cexpr_t* e) override {
+		cexpr_t* x = e->x != nullptr ? strip_casts(e->x) : nullptr;
+		const bool writes = (is_assignment(e->op) || e->op == cot_ref ||
+							 e->op == cot_preinc || e->op == cot_postinc ||
+							 e->op == cot_predec || e->op == cot_postdec);
+		if (writes && x != nullptr && x->op == cot_var && x->v.idx == var) {
+			found = true;
+			return 1;
+		}
+		return 0;
+	}
+};
+
+static bool writes_var(cinsn_t* i, int var) {
+	var_writer_t w(var);
+	w.apply_to(i, nullptr);
+	return w.found;
+}
+
+// Has a return anywhere inside
+struct return_finder_t : public ctree_visitor_t {
+	bool found = false;
+	return_finder_t() : ctree_visitor_t(CV_FAST) {}
+	int idaapi visit_insn(cinsn_t* i) override {
+		if (i->op != cit_return) return 0;
+		found = true;
+		return 1;
+	}
+};
+
 struct id_return_finder_t : public ctree_visitor_t {
 	cfunc_t* cf;
 	std::set<int> vars;
 	std::map<int, qstring> inline_ids;
+	std::map<int, cmp_var_t> cmp_vars;
 	std::vector<id_return_t> out;
 
 	id_return_finder_t(cfunc_t* f, int var) : ctree_visitor_t(CV_FAST), cf(f) {
@@ -140,6 +214,10 @@ struct id_return_finder_t : public ctree_visitor_t {
 		inline_cmp_finder_t icf(vars);
 		icf.apply_to(&cf->body, nullptr);
 		inline_ids = std::move(icf.ids);
+
+		cmp_var_finder_t cvf(vars);
+		cvf.apply_to(&cf->body, nullptr);
+		cmp_vars = std::move(cvf.found);
 	}
 
 	// cmp(id, "literal") in any of the accepted forms
@@ -147,11 +225,18 @@ struct id_return_finder_t : public ctree_visitor_t {
 		cexpr_t* x = cmp_operand(c, in_then);
 		if (x == nullptr) return false;
 		if (x->op == cot_var) {
-			auto it = inline_ids.find(x->v.idx);
-			if (it == inline_ids.end()) return false;
-			id = it->second;
+			if (auto it = inline_ids.find(x->v.idx); it != inline_ids.end()) {
+				id = it->second;
+				return true;
+			}
+
+			auto it = cmp_vars.find(x->v.idx);
+			if (it == cmp_vars.end()) return false;
+			id = it->second.id;
+			if (it->second.match_nonzero) in_then = !in_then;
 			return true;
 		}
+
 		return arg_pos(x, vars) >= 0 && literal_arg(x, id);
 	}
 
@@ -225,22 +310,123 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return true;
 	}
 
-	void add(std::vector<id_return_t>& ids, cinsn_t* branch) {
-		bool cond = false;
-		const ea_t ea = branch_obj(branch, cond);
+	/*
+		The value var holds when control reaches `i` (the last `var = &obj` or
+		`var = obj` before it BADADDR when var is written otherwise
+	*/
+	ea_t value_before(cinsn_t* i, int var) {
+		for (cinsn_t* cur = i;;) {
+			citem_t* p = cf->body.find_parent_of(cur);
+			if (p == nullptr || p->is_expr()) return BADADDR;
+
+			cinsn_t* pi = (cinsn_t*)p;
+
+			if (pi->op == cit_block) {
+				cblock_t* b = pi->cblock;
+				auto it = std::find_if(b->begin(), b->end(),
+					[&](const cinsn_t& s) { return &s == cur; });
+
+				while (it != b->begin()) {
+					cinsn_t& s = *--it;
+					if (!writes_var(&s, var)) continue;
+					if (s.op != cit_expr || s.cexpr->op != cot_asg)
+						return BADADDR;
+
+					cexpr_t* l = strip_casts(s.cexpr->x);
+					cexpr_t* r = strip_casts(s.cexpr->y);
+					if (l->op != cot_var || l->v.idx != var) return BADADDR;
+
+					if (r->op == cot_ref) r = strip_casts(r->x);
+					return r->op == cot_obj ? r->obj_ea : BADADDR;
+				}
+
+			} else if (pi->op != cit_if) {
+				return BADADDR; // a loop or switch - nonlinear
+			}
+			cur = pi;
+		}
+	}
+
+	/*
+		What the function returns when `i` is passed without taking its
+		branch: the first return reached after it. `return &obj;` is the object,
+		`return v;` the value v had before `i`, when nothing on the way writes
+	   v. A return passed inside another statement on the way makes the match
+	   conditional
+	*/
+	ea_t fallthrough_obj(cinsn_t* i, bool& cond) {
+		std::vector<cinsn_t*> path;
+
+		for (cinsn_t* cur = i;;) {
+			citem_t* p = cf->body.find_parent_of(cur);
+			if (p == nullptr || p->is_expr()) return BADADDR;
+			cinsn_t* pi = (cinsn_t*)p;
+
+			if (pi->op == cit_if) {
+				cur = pi;
+				continue;
+			}
+			if (pi->op != cit_block) return BADADDR; // loops, switch
+
+			bool after = false;
+			for (cinsn_t& s : *pi->cblock) {
+				if (&s == cur) {
+					after = true;
+					continue;
+				}
+				if (!after) continue;
+
+				if (s.op == cit_return) {
+					cexpr_t* e = strip_casts(&s.creturn->expr);
+					if (e->op != cot_var) return returned_obj(&s);
+					for (cinsn_t* w : path)
+						if (writes_var(w, e->v.idx)) return BADADDR;
+					return value_before(i, e->v.idx);
+				}
+				if (s.op == cit_goto || s.op == cit_break ||
+					s.op == cit_continue)
+					return BADADDR;
+
+				return_finder_t rf;
+				rf.apply_to(&s, nullptr);
+				cond |= rf.found;
+				path.push_back(&s);
+			}
+			cur = pi;
+		}
+	}
+
+	void add_at(std::vector<id_return_t>& ids, ea_t ea, bool cond) {
 		if (ea == BADADDR) return;
 		for (id_return_t& r : ids) {
 			r.ea = ea;
 			r.conditional |= cond;
-			out.push_back(r);
+
+			auto same = [&](const id_return_t& o) {
+				return o.id == r.id && o.ea == r.ea;
+			};
+			if (std::none_of(out.begin(), out.end(), same)) out.push_back(r);
 		}
+	}
+
+	void add(std::vector<id_return_t>& ids, cinsn_t* branch) {
+		bool cond = false;
+		const ea_t ea = branch_obj(branch, cond);
+		add_at(ids, ea, cond);
 	}
 
 	int idaapi visit_insn(cinsn_t* i) override {
 		std::vector<id_return_t> ids;
 		bool in_then;
 		if (id_check(i, in_then, ids)) {
-			add(ids, in_then ? i->cif->ithen : i->cif->ielse);
+			if (in_then || i->cif->ielse != nullptr) {
+				add(ids, in_then ? i->cif->ithen : i->cif->ielse);
+				return 0;
+			}
+
+			// result = &a; if (cmp(id, "a")) { ... } return result;
+			bool cond = false;
+			add_at(ids, fallthrough_obj(i, cond), cond);
 			return 0;
 		}
 		if (i->op != cit_block) return 0;
