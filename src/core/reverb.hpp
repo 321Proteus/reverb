@@ -2,7 +2,7 @@
 
 #include <pro.h>
 namespace rv {
-enum class Interface { VST2, VST3, AU, AAX, CLAP, _COUNT };
+enum class Interface { VST2, VST3, AU, AAX, CLAP, LV2, _COUNT };
 
 class InterfaceSet {
 public:
@@ -30,6 +30,7 @@ inline const char* get_interface_name(Interface iface) {
 	case Interface::AU:	  return "AU";
 	case Interface::AAX:  return "AAX";
 	case Interface::CLAP: return "CLAP";
+	case Interface::LV2:  return "LV2";
 	default:			  return "Other";
 	}
 }

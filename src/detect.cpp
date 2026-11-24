@@ -35,6 +35,8 @@ rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
 		case str_cth("AUPluginInstanceEntry"):
 			found.add(rv::Interface::AU);
 			break;
+		case str_cth("lv2_descriptor"):
+			found.add(rv::Interface::LV2);
 
 		}
 	}
