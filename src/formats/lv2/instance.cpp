@@ -9,6 +9,7 @@
 #include "ui/report.hpp"
 #include <demangle.hpp>
 #include <name.hpp>
+#include <map>
 #include <set>
 
 namespace rv::lv2 {
@@ -81,34 +82,60 @@ static bool is_var(cexpr_t* e, int var) {
 	return e->op == cot_var && e->v.idx == var;
 }
 
-// var = alloc(N), then the first call that passes var first and is a
-// statement of its own (a constructor; a getter's result is used)
+// Locals assigned an allocation of constant size, and the first call that
+// passes each of them first and is a statement of its own (a constructor;
+// a getter's result is used). var = other copies are followed one hop
 struct alloc_finder_t : public ctree_parentee_t {
-	int var;
-	instance_t& out;
+	struct rec_t {
+		size_t size = 0;
+		ea_t site = BADADDR, alloc = BADADDR, ctor = BADADDR;
+	};
 
-	alloc_finder_t(int v, instance_t& o) : var(v), out(o) {}
+	int var;
+	std::map<int, rec_t> recs;
+	int src = -1; // the local var got its allocation from
+
+	alloc_finder_t(int v) : var(v) {}
 
 	int idaapi visit_expr(cexpr_t* e) override {
-		if (out.site == BADADDR) {
-			if (e->op != cot_asg || !is_var(e->x, var)) return 0;
+		if (e->op == cot_asg) {
+			cexpr_t* l = strip_casts(e->x);
+			cexpr_t* r = strip_casts(e->y);
+			if (l->op != cot_var) return 0;
 
-			cexpr_t* call = strip_casts(e->y);
-			if (call->op != cot_call || call->a->empty()) return 0;
+			// var = v25, after v25 = alloc(N)
+			if (r->op == cot_var && l->v.idx == var && src < 0 &&
+				recs.count(r->v.idx) != 0) {
+				src = r->v.idx;
+				return 0;
+			}
+			if (r->op != cot_call || r->a->empty()) return 0;
 
-			cexpr_t* n = strip_casts(&call->a->at(0));
-			const ea_t fn = direct_callee(call);
+			cexpr_t* n = strip_casts(&r->a->at(0));
+			const ea_t fn = direct_callee(r);
 			if (n->op != cot_num || fn == BADADDR || !is_allocator(fn))
 				return 0;
 
-			out.size = size_t(n->numval());
-			out.site = e->ea;
-			out.alloc = fn;
+			rec_t& rec = recs[l->v.idx];
+			if (rec.site == BADADDR) {
+				rec.size = size_t(n->numval());
+				rec.site = e->ea;
+				rec.alloc = fn;
+			}
+			if (l->v.idx == var && src < 0) src = var;
 			return 0;
 		}
 
-		if (e->op != cot_call || e->a->empty() || !is_var(&e->a->at(0), var))
-			return 0;
+		if (e->op != cot_call || e->a->empty()) return 0;
+		cexpr_t* a0 = strip_casts(&e->a->at(0));
+		if (a0->op != cot_var) return 0;
+
+		// After the allocation: var itself gets a record once it has one
+		auto it = recs.find(a0->v.idx);
+		if (it == recs.end() && a0->v.idx == var && src >= 0)
+			it = recs.emplace(var, recs[src]).first;
+		if (it == recs.end() || it->second.ctor != BADADDR) return 0;
+
 		if (parents.empty() || parents.back() == nullptr ||
 			parents.back()->is_expr())
 			return 0;
@@ -118,8 +145,21 @@ struct alloc_finder_t : public ctree_parentee_t {
 		if (pfn == nullptr || in_extern_seg(fn) || (pfn->flags & FUNC_LIB) != 0)
 			return 0;
 
-		out.ctor = fn;
-		return 1; // done
+		it->second.ctor = fn;
+		return 0;
+	}
+
+	// -> false when var got no allocation
+	bool result(instance_t& out) const {
+		if (src < 0) return false;
+		const rec_t& r = recs.at(src);
+		out.size = r.size;
+		out.site = r.site;
+		out.alloc = r.alloc;
+		out.ctor = r.ctor;
+		if (auto v = recs.find(var); out.ctor == BADADDR && v != recs.end())
+			out.ctor = v->second.ctor;
+		return true;
 	}
 };
 
@@ -170,9 +210,9 @@ bool find_instance(ea_t inst, instance_t& out) {
 			"instantiate at %a returns a local assigned more than once", inst);
 	}
 
-	alloc_finder_t f(out.var, out);
+	alloc_finder_t f(out.var);
 	f.apply_to(&cf->body, nullptr);
-	if (out.site == BADADDR) {
+	if (!f.result(out)) {
 		rv_log("instantiate at %a: the returned object is not allocated "
 			   "with a constant size",
 			inst);
