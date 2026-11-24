@@ -5,6 +5,8 @@ target_sources(reverb PRIVATE
     extensions.hpp
     features.cpp
     features.hpp
+    instance.cpp
+    instance.hpp
     lv2.hpp
     scan.cpp
     uris.hpp

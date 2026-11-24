@@ -86,6 +86,7 @@ static std::vector<desc_t> scan_descriptors(
 
 		const ea_t inst = member_ptr(d.ea, tif, "instantiate");
 		d.features = find_features(inst);
+		d.has_instance = find_instance(inst, d.instance);
 
 		const ea_t ed = member_ptr(d.ea, tif, "extension_data");
 		if (ed == 0 || ed == BADADDR) continue;

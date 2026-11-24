@@ -205,6 +205,8 @@ void label_descriptor(const desc_t& d, bool unique) {
 	}
 
 	label_features(member_ptr(d.ea, tif, "instantiate"), d.features);
+	if (d.has_instance)
+		label_instance(d.instance, (prefix + "_instance").c_str());
 
 	if (d.exts.fn == BADADDR) return;
 

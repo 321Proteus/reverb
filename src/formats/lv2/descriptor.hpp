@@ -1,6 +1,7 @@
 #pragma once
 
 #include "extensions.hpp"
+#include "instance.hpp"
 #include <pro.h>
 #include <typeinf.hpp>
 #include <vector>
@@ -34,6 +35,8 @@ struct desc_t {
 	qstrvec_t features;
 	ext_scan_t exts;
 	bool exts_shared = false; // extension_data of an earlier descriptor
+	instance_t instance;
+	bool has_instance = false; // instantiate allocates it with a known size
 };
 
 /*
