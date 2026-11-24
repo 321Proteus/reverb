@@ -95,6 +95,12 @@ def main():
     )
 
     ap.add_argument(
+        "--lv2",
+        help="an LV2 include dir holding lv2/ "
+        "(default: <sdks>/lv2/include)"
+    )
+
+    ap.add_argument(
         "--sys-include",
         action="append",
         default=[],
@@ -154,7 +160,8 @@ def main():
             a.sys_include = core.host_includes(a.cxx)
 
     if a.source in ("formats", "all"):
-        sources.append(Formats(a.sdks, a.xwin, a.vst3, a.sys_include))
+        sources.append(Formats(a.sdks, a.xwin, a.vst3, a.sys_include,
+                               a.lv2))
     if a.source in ("juce", "all"):
         sources.append(Juce(a.sdks, a.xwin, a.sys_include,
                           a.only.split(",") if a.only else ()))
@@ -264,6 +271,8 @@ def run_children(a, sources, out, log):
                    "--log", str(logf)]
             if a.vst3:
                 cmd += ["--vst3", a.vst3]
+            if a.lv2:
+                cmd += ["--lv2", a.lv2]
             if a.only:
                 cmd += ["--only", a.only]
             if a.full:
