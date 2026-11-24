@@ -282,6 +282,15 @@ class Session:
         os.environ["IDALOG"] = str(self.log_path)  # before the import
         usr = str(parser_idausr(logs=clang_logs))
         base = os.environ.get("IDAUSR") or str(Path.home() / ".idapro")
+
+        if not os.environ.get("IDADIR"):
+            cfg = Path(base.split(os.pathsep)[0]) / "ida-config.json"
+            try:
+                d = json.loads(cfg.read_text())["Paths"]["ida-install-dir"]
+            except (OSError, ValueError, KeyError, TypeError):
+                d = None
+            if d:
+                os.environ["IDADIR"] = d
         if usr not in base.split(os.pathsep):
             os.environ["IDAUSR"] = base + os.pathsep + usr
         import idapro
