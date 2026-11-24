@@ -1,16 +1,17 @@
-#include "label.hpp"
+#include "fn_table.hpp"
 #include "core/log.hpp"
 #include "db/read.hpp"
 #include "db/segments.hpp"
 #include "db/types.hpp"
 #include "decomp/analysis.hpp"
+#include "decomp/stores.hpp"
 #include <bytes.hpp>
 #include <climits>
 #include <funcs.hpp>
 #include <name.hpp>
 #include <segment.hpp>
 
-namespace rv::clap {
+namespace rv {
 
 fn_ref_t classify_fn(ea_t fn, ea_t owner, size_t owner_size) {
 	fn_ref_t r;
@@ -59,7 +60,7 @@ void label_fn(ea_t fn, const udm_t& m, const char* prefix, ea_t owner,
 
 	if (r.shared) {
 		qstring cmt;
-		cmt.sprnt("CLAP: %s (shared function, left unnamed)", name.c_str());
+		cmt.sprnt("REverb: %s (shared function, left unnamed)", name.c_str());
 		set_func_cmt(get_func(fn), cmt.c_str(), true);
 		return;
 	}
@@ -103,6 +104,38 @@ void label_fn_table(ea_t ea, const char* type, const char* prefix) {
 				read_ptr(ea + m.offset / 8), m, prefix, ea, tif.get_size());
 }
 
+bool is_fn_table(ea_t ea, const tinfo_t& tif, bool allow_null) {
+	const size_t sz = tif.get_size();
+	if (sz == BADSIZE || !is_loaded(ea) || !is_loaded(ea + sz - 1) ||
+		in_got_seg(ea))
+		return false;
+
+	udt_type_data_t udt;
+	if (!tif.get_udt_details(&udt)) return false;
+
+	int fns = 0;
+	for (const udm_t& m : udt) {
+		const ea_t fn = read_ptr(ea + m.offset / 8);
+		if (!m.type.is_funcptr()) {
+			if (m.type.is_ptr() && is_code_addr(fn)) return false; // desc
+			continue;
+		}
+		if (fn == 0 && allow_null) continue;
+		if (!is_code_addr(fn) || in_extern_seg(fn)) return false;
+		fns++;
+	}
+	return fns > 0;
+}
+
+bool resolve_table(ea_t& ea, const tinfo_t& tif, bool allow_null) {
+	if (is_fn_table(ea, tif, allow_null)) return true;
+	ea_t p;
+	if (!load_ptr_const(ea, p) || !is_fn_table(p, tif, allow_null))
+		return false;
+	ea = p;
+	return true;
+}
+
 qstring c_ident(const qstring& s) {
 	qstring r = s;
 	for (size_t i = 0; i < r.length(); i++)
@@ -110,4 +143,4 @@ qstring c_ident(const qstring& s) {
 	return r;
 }
 
-} // namespace rv::clap
+} // namespace rv

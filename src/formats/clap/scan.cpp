@@ -2,7 +2,7 @@
 #include "clap.hpp"
 #include "factory.hpp"
 #include "descriptor.hpp"
-#include "label.hpp"
+#include "formats/fn_table.hpp"
 #include "plugin.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/returns.hpp"

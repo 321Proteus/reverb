@@ -1,5 +1,5 @@
 #include "descriptor.hpp"
-#include "label.hpp"
+#include "formats/fn_table.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "db/read.hpp"

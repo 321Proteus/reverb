@@ -1,4 +1,6 @@
 target_sources(reverb PRIVATE
+    fn_table.cpp
+    fn_table.hpp
     format.hpp
     registry.cpp
     types_embed.hpp

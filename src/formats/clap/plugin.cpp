@@ -1,7 +1,7 @@
 #include "plugin.hpp"
 #include "exts.hpp"
 #include "factory.hpp"
-#include "label.hpp"
+#include "formats/fn_table.hpp"
 #include "core/log.hpp"
 #include "db/func_iter.hpp"
 #include "db/members.hpp"

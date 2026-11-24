@@ -1,4 +1,5 @@
 #include "factory.hpp"
+#include "formats/fn_table.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "db/read.hpp"
@@ -14,39 +15,6 @@
 #include "exts.hpp"
 
 namespace rv::clap {
-
-// Return whether every func pointer member points into local code, other
-// pointer members don't, and the struct is loaded outside GOT. Runs of GOT
-// slots (strcmp, local functions in PIC) and vtables are not tables
-bool is_fn_table(ea_t ea, const tinfo_t& tif) {
-	const size_t sz = tif.get_size();
-	if (sz == BADSIZE || !is_loaded(ea) || !is_loaded(ea + sz - 1) ||
-		in_got_seg(ea))
-		return false;
-
-	udt_type_data_t udt;
-	if (!tif.get_udt_details(&udt)) return false;
-
-	int fns = 0;
-	for (const udm_t& m : udt) {
-		const ea_t fn = read_ptr(ea + m.offset / 8);
-		if (!m.type.is_funcptr()) {
-			if (m.type.is_ptr() && is_code_addr(fn)) return false; // desc
-			continue;
-		}
-		if (!is_code_addr(fn) || in_extern_seg(fn)) return false;
-		fns++;
-	}
-	return fns > 0;
-}
-
-bool resolve_table(ea_t& ea, const tinfo_t& tif) {
-	if (is_fn_table(ea, tif)) return true;
-	ea_t p;
-	if (!load_ptr_const(ea, p) || !is_fn_table(p, tif)) return false;
-	ea = p;
-	return true;
-}
 
 static bool id_char(int c) {
 	return qisalnum(c) || c == '.' || c == '-' || c == '_' || c == '/';
