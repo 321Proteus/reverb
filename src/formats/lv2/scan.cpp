@@ -1,5 +1,6 @@
 #include "lv2.hpp"
 #include "descriptor.hpp"
+#include "features.hpp"
 #include "core/log.hpp"
 #include "db/func_iter.hpp"
 #include "db/members.hpp"

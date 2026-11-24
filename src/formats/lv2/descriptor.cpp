@@ -1,4 +1,5 @@
 #include "descriptor.hpp"
+#include "features.hpp"
 
 #include "core/log.hpp"
 #include "db/func_iter.hpp"
@@ -203,7 +204,7 @@ void label_descriptor(const desc_t& d, bool unique) {
 		resolve_data_fields(layout.fields, d.ea, o, inf_is_64bit());
 	}
 
-	report_features(member_ptr(d.ea, tif, "instantiate"), d.features);
+	label_features(member_ptr(d.ea, tif, "instantiate"), d.features);
 
 	if (d.exts.fn == BADADDR) return;
 

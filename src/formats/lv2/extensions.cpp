@@ -1,7 +1,6 @@
 #include "extensions.hpp"
 #include "core/log.hpp"
 #include "decomp/analysis.hpp"
-#include "decomp/stores.hpp"
 #include "formats/fn_table.hpp"
 #include "patterns/id_returns.hpp"
 #include "ui/report.hpp"
@@ -66,29 +65,6 @@ ext_scan_t find_extensions(ea_t ed) {
 	return s;
 }
 
-qstrvec_t find_features(ea_t inst) {
-	qstrvec_t found;
-
-	for (ea_t fn : { inst, rv::direct_tail_callee(inst) }) {
-		if (fn == BADADDR) continue;
-
-		cfuncptr_t cf = rv::decompile_at(fn);
-		if (cf == nullptr) continue;
-
-		literal_collector_t lc;
-		lc.apply_to(&cf->body, nullptr);
-		for (const qstring& s : lc.strs)
-			if (by_uri(FEATURES, s.c_str()) != nullptr &&
-				std::find(found.begin(), found.end(), s) == found.end())
-				found.push_back(s);
-	}
-
-	rv_log("instantiate at %a checks %u known feature(s)", inst,
-		unsigned(found.size()));
-
-	return found;
-}
-
 // LV2_State_Interface -> lv2_state_interface
 static qstring type_prefix(const char* type) {
 	qstring s(type);
@@ -129,16 +105,6 @@ void label_extensions(const ext_scan_t& s) {
 	}
 
 	mark_cfunc_dirty(s.fn);
-}
-
-void report_features(ea_t inst, const qstrvec_t& features) {
-	for (const qstring& uri : features) {
-		const uri_type_t* f = by_uri(FEATURES, uri.c_str());
-		qstring v = uri;
-		if (f != nullptr && f->type != nullptr) v.cat_sprnt(" (%s)", f->type);
-
-		report::row("feature", v, inst);
-	}
 }
 
 } // namespace rv::lv2

@@ -259,6 +259,16 @@ struct id_return_finder_t : public ctree_visitor_t {
 	}
 };
 
+cexpr_t* literal_cmp(cexpr_t* c, bool& in_then, qstring& lit) {
+	cexpr_t* x = cmp_operand(c, in_then);
+	// clang-format off
+	return x != nullptr &&
+		x->op == cot_call &&
+		literal_arg(x, lit)
+		? x : nullptr;
+	// clang-format on
+}
+
 std::vector<id_return_t> find_id_returns(ea_t fn_ea, int arg) {
 	cfuncptr_t cf = decompile_at(fn_ea);
 	if (cf == nullptr || arg >= int(cf->argidx.size())) return {};

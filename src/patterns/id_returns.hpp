@@ -1,5 +1,6 @@
 #pragma once
 
+#include <hexrays.hpp>
 #include <pro.h>
 #include <vector>
 
@@ -24,5 +25,13 @@ struct id_return_t {
 	behind a goto or a nested if (other) return x; (also conditional)
 */
 std::vector<id_return_t> find_id_returns(ea_t fn_ea, int arg = 0);
+
+/*
+	An if condition that compares with a string literal, in the forms above:
+	cmp(x, "lit") == 0 and !cmp() match in the then-branch, cmp() != 0 and a
+	bare cmp() in the else-branch. -> the call (its other arguments are what
+	is compared), nullptr when c is no such compare
+*/
+cexpr_t* literal_cmp(cexpr_t* c, bool& in_then, qstring& lit);
 
 } // namespace rv

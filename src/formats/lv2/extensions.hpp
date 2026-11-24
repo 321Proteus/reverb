@@ -26,12 +26,8 @@ struct ext_scan_t {
 */
 ext_scan_t find_extensions(ea_t ed);
 
-// The host feature URIs instantiate compares LV2_Feature::URI with
-qstrvec_t find_features(ea_t inst);
-
 // Types, names and comments the tables and reports rows under the current
 // heading
 void label_extensions(const ext_scan_t& s);
-void report_features(ea_t inst, const qstrvec_t& features);
 
 } // namespace rv::lv2

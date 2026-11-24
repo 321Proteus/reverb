@@ -3,6 +3,8 @@ target_sources(reverb PRIVATE
     descriptor.hpp
     extensions.cpp
     extensions.hpp
+    features.cpp
+    features.hpp
     lv2.hpp
     scan.cpp
     uris.hpp

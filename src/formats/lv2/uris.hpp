@@ -4,8 +4,12 @@
 
 /*
 	The URIs of the LV2 SDK (lv2/include/lv2) that REverb knows the C types
-	of. Extensions are the features what the host passes to instantiate()
-	(= what extension_data() returns, type nullptr: a feature without data)
+	of, one table per direction:
+	- extensions: interfaces the plugin gives the host, returned by
+	  extension_data(); type is the interface struct
+	- features: what the host gives the plugin, in instantiate()'s features
+	  array, type is what LV2_Feature::data points to, nullptr for a
+	  feature without data
 */
 namespace rv::lv2 {
 
@@ -26,7 +30,7 @@ inline constexpr uri_type_t EXTENSIONS[] = {
 	{ RV_LV2 "extensions/ui#resize", "LV2UI_Resize" },
 };
 
-// LV2_Feature::URI: Pointed by LV2_Feature::data
+// LV2_Feature::URI -> the type LV2_Feature::data points to
 inline constexpr uri_type_t FEATURES[] = {
 	{ RV_LV2 "ext/urid#map", "LV2_URID_Map" },
 	{ RV_LV2 "ext/urid#unmap", "LV2_URID_Unmap" },
