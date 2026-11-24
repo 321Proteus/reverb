@@ -8,6 +8,7 @@
 #include "decomp/analysis.hpp"
 #include "formats/fn_table.hpp"
 #include "ui/report.hpp"
+#include <algorithm>
 #include <name.hpp>
 #include <set>
 
@@ -130,6 +131,19 @@ void scan() {
 	}
 
 	if (s.ui != BADADDR) s.uis = scan_descriptors(s.ui, UI, done);
+
+	// A UI descriptor also passes for a plugin one when found by a data scan
+	auto is_ui = [&](const desc_t& p) {
+		for (const desc_t& u : s.uis)
+			if (u.ea == p.ea) {
+				rv_log("%a is the UI descriptor, not a plugin one", p.ea);
+				return true;
+			}
+		return false;
+	};
+	s.plugins.erase(std::remove_if(s.plugins.begin(), s.plugins.end(), is_ui),
+		s.plugins.end());
+
 	s.valid = true;
 }
 

@@ -1,4 +1,6 @@
 #include "instance.hpp"
+#include "uris.hpp"
+#include "db/read.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "decomp/analysis.hpp"
@@ -7,12 +9,17 @@
 #include "ui/report.hpp"
 #include <demangle.hpp>
 #include <name.hpp>
+#include <set>
 
 namespace rv::lv2 {
 
 static constexpr asize_t MAX_ALLOC_WRAPPER = 0x100; // bytes of code
 // libstdc++: malloc, get_new_handler, the handler, bad_alloc allocate + throw
 static constexpr int MAX_ALLOC_WRAPPER_CALLS = 6;
+
+// Calls followed from instantiate for stores into the instance: the
+// constructor, and the constructors of its members
+static constexpr int MAX_CTOR_DEPTH = 3;
 
 static bool named_any(ea_t ea, std::initializer_list<const char*> names) {
 	qstring raw, dem;
@@ -74,13 +81,13 @@ static bool is_var(cexpr_t* e, int var) {
 	return e->op == cot_var && e->v.idx == var;
 }
 
-// var = alloc(N), then the first call that passes var first
-struct alloc_finder_t : public ctree_visitor_t {
+// var = alloc(N), then the first call that passes var first and is a
+// statement of its own (a constructor; a getter's result is used)
+struct alloc_finder_t : public ctree_parentee_t {
 	int var;
 	instance_t& out;
 
-	alloc_finder_t(int v, instance_t& o)
-		: ctree_visitor_t(CV_FAST), var(v), out(o) {}
+	alloc_finder_t(int v, instance_t& o) : var(v), out(o) {}
 
 	int idaapi visit_expr(cexpr_t* e) override {
 		if (out.site == BADADDR) {
@@ -102,6 +109,9 @@ struct alloc_finder_t : public ctree_visitor_t {
 
 		if (e->op != cot_call || e->a->empty() || !is_var(&e->a->at(0), var))
 			return 0;
+		if (parents.empty() || parents.back() == nullptr ||
+			parents.back()->is_expr())
+			return 0;
 
 		const ea_t fn = direct_callee(e);
 		func_t* pfn = fn != BADADDR ? get_func(fn) : nullptr;
@@ -113,6 +123,27 @@ struct alloc_finder_t : public ctree_visitor_t {
 	}
 };
 
+// The one local every non-null return returns, however often it is assigned
+struct returned_var_t : public ctree_visitor_t {
+	int var = -1;
+	bool mixed = false;
+
+	returned_var_t() : ctree_visitor_t(CV_FAST) {}
+
+	int idaapi visit_insn(cinsn_t* i) override {
+		if (i->op != cit_return || i->creturn == nullptr) return 0;
+
+		cexpr_t* e = strip_casts(&i->creturn->expr);
+		if (e->op == cot_num) return 0; // return nullptr
+
+		if (e->op != cot_var || (var >= 0 && e->v.idx != var)) mixed = true;
+		else
+			var = e->v.idx;
+
+		return 0;
+	}
+};
+
 bool find_instance(ea_t inst, instance_t& out) {
 	out = {};
 	out.inst = inst;
@@ -121,13 +152,25 @@ bool find_instance(ea_t inst, instance_t& out) {
 	if (cf == nullptr) return false;
 
 	loc_t l;
-	if (!rv::return_loc(cf, l) || l.off != 0 || l.var < 0) {
-		rv_log("instantiate at %a returns no single local", inst);
-		return false;
-	}
-	out.var = l.var;
+	if (rv::return_loc(cf, l) && l.off == 0 && l.var >= 0) {
+		out.var = l.var;
+	} else {
+		// A local Hex-Rays merged with another value might be assigned more
+		// than once
+		returned_var_t rv;
+		rv.apply_to(&cf->body, nullptr);
+		if (rv.mixed || rv.var < 0) {
+			rv_log("instantiate at %a returns no single local", inst);
+			return false;
+		}
 
-	alloc_finder_t f(l.var, out);
+		out.var = rv.var;
+		out.shared_local = true;
+		rv_log(
+			"instantiate at %a returns a local assigned more than once", inst);
+	}
+
+	alloc_finder_t f(out.var, out);
 	f.apply_to(&cf->body, nullptr);
 	if (out.site == BADADDR) {
 		rv_log("instantiate at %a: the returned object is not allocated "
@@ -138,6 +181,7 @@ bool find_instance(ea_t inst, instance_t& out) {
 
 	rv_log("instantiate at %a allocates 0x%llX bytes at %a%s", inst,
 		(uint64)out.size, out.site, out.ctor != BADADDR ? ", constructed" : "");
+
 	if (out.ctor != BADADDR) rv_log("  constructor %a", out.ctor);
 	return true;
 }
@@ -145,9 +189,11 @@ bool find_instance(ea_t inst, instance_t& out) {
 // The local struct type_name, created fixed-size if missing
 static bool instance_type(const char* type_name, size_t size, tinfo_t& out) {
 	if (out.get_named_type(get_idati(), type_name)) {
-		if (out.get_size() != size)
+		if (out.get_size() != size) {
 			rv_log("%s exists with 0x%llX bytes, 0x%llX allocated; kept",
 				type_name, (uint64)out.get_size(), (uint64)size);
+		}
+
 		return true;
 	}
 
@@ -163,6 +209,73 @@ static bool instance_type(const char* type_name, size_t size, tinfo_t& out) {
 	}
 
 	return out.get_named_type(get_idati(), type_name);
+}
+
+// A local typed by label_features(pointer to a feature's data type)
+static bool feature_ptr(const tinfo_t& t) {
+	qstring n;
+	if (!t.is_ptr() || !t.get_pointed_object().get_type_name(&n)) return false;
+	for (const uri_type_t& f : FEATURES)
+		if (f.type != nullptr && n == f.type) return true;
+
+	return false;
+}
+
+/*
+	The feature pointers instantiate stores into the instance, itself or in
+	the calls it passes both to (the constructor and the members' ones),
+	added to the struct as members named and typed like the locals
+*/
+static void label_fields(ea_t inst, tinfo_t& st) {
+	cfuncptr_t cf = rv::decompile_at(inst, DECOMP_NO_WAIT | DECOMP_NO_CACHE);
+	loc_t l;
+	if (cf == nullptr || !rv::return_loc(cf, l) || l.off != 0) return;
+
+	store_collector_t col(cf);
+	col.inline_calls = true;
+	col.inline_depth = MAX_CTOR_DEPTH;
+	col.bind_locals = true;
+	col.apply_to(&cf->body, nullptr);
+
+	const lvars_t* lv = cf->get_lvars();
+	std::set<int64> done;
+
+	for (const store_t& s : col.stores) {
+		if (s.loc.var != l.var || s.val.t != val_t::LOCAL ||
+			s.val.loc.off != 0 || s.size != ptr_size() ||
+			!done.insert(s.loc.off).second)
+			continue;
+
+		const int v = s.val.loc.var;
+		if (v < 0 || size_t(v) >= lv->size() || !feature_ptr(lv->at(v).type()))
+			continue;
+
+		udm_t cur;
+		cur.offset = uint64(s.loc.off) * 8;
+		if (st.find_udm(&cur, STRMEM_OFFSET) >= 0) continue; // kept
+
+		udm_t m;
+		m.name = lv->at(v).name;
+		m.type = lv->at(v).type();
+		m.offset = uint64(s.loc.off) * 8;
+		m.size = uint64(ptr_size()) * 8;
+
+		if (st.add_udm(m) != TERR_OK) { // the name is taken
+			m.name.cat_sprnt("_%llX", (uint64)s.loc.off);
+			if (st.add_udm(m) != TERR_OK) {
+				rv_log("Could not add %s at +0x%llX", m.name.c_str(),
+					(uint64)s.loc.off);
+				continue;
+			}
+		}
+
+		qstring t, row;
+		m.type.print(&t);
+		row.sprnt(
+			"%s %s at +0x%llX", t.c_str(), m.name.c_str(), (uint64)s.loc.off);
+		rv_log("Instance field %s, stored at %a", row.c_str(), s.ea);
+		report::row("field", row, s.ea);
+	}
 }
 
 void label_instance(const instance_t& in, const char* type_name) {
@@ -198,6 +311,8 @@ void label_instance(const instance_t& in, const char* type_name) {
 	v.sprnt("%s (0x%llX bytes)", type_name, (uint64)in.size);
 	report::row("instance", v, in.site);
 	if (in.ctor != BADADDR) report::addr_row("constructor", in.ctor);
+
+	label_fields(in.inst, st);
 }
 
 } // namespace rv::lv2

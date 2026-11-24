@@ -65,11 +65,55 @@ static bool read_descriptor(
 }
 
 // Descriptors the function references (one or an array, values or pointers)
+// An argument used in arithmetic or as an index (descs[index]), not only
+// compared (if (index != 0) return nullptr)
+struct index_use_t : public ctree_visitor_t {
+	const cfunc_t* cf;
+	bool found = false;
+
+	index_use_t(const cfunc_t* f) : ctree_visitor_t(CV_FAST), cf(f) {}
+
+	bool is_arg(cexpr_t* e) const {
+		e = strip_casts(e);
+		return e->op == cot_var &&
+			   std::find(cf->argidx.begin(), cf->argidx.end(), e->v.idx) !=
+				   cf->argidx.end();
+	}
+
+	int idaapi visit_expr(cexpr_t* e) override {
+		switch (e->op) {
+		case cot_idx:
+		case cot_add:
+		case cot_sub:
+		case cot_mul:
+		case cot_shl:
+			found = is_arg(e->x) || is_arg(e->y);
+			return found ? 1 : 0;
+		default: return 0;
+		}
+	}
+};
+
+static bool indexes(ea_t fn) {
+	cfuncptr_t cf = rv::decompile_at(fn);
+	if (cf == nullptr) return true; // unknown: allow arrays
+	index_use_t u(cf);
+	u.apply_to(&cf->body, nullptr);
+	return u.found;
+}
+
 static void from_refs(ea_t fn, const tinfo_t& tif, const desc_kind_t& kind,
 	std::vector<desc_t>& out) {
 
 	func_t* pfn = rv::ensure_func(fn);
 	if (pfn == nullptr) return;
+
+	/*
+		Arrays only when the getter indexes. Otherwise the walk runs into
+		whatever follows a single descriptor: in Cardinal, the UI descriptor
+		passes for an LV2_Descriptor
+	*/
+	const int max = indexes(fn) ? MAX_DESCS : 1;
 
 	auto add = [&](const desc_t& d) {
 		auto same = [&](const desc_t& o) { return o.ea == d.ea; };
@@ -90,13 +134,12 @@ static void from_refs(ea_t fn, const tinfo_t& tif, const desc_kind_t& kind,
 
 			if (read_descriptor(t, tif, kind, d)) {
 				for (int k = 0;
-					k < MAX_DESCS && read_descriptor(t + k * sz, tif, kind, d);
-					k++)
+					k < max && read_descriptor(t + k * sz, tif, kind, d); k++)
 					add(d);
 				continue;
 			}
 
-			for (int k = 0; k < MAX_DESCS && is_loaded(t + k * ps); k++) {
+			for (int k = 0; k < max && is_loaded(t + k * ps); k++) {
 				if (!read_descriptor(read_ptr(t + k * ps), tif, kind, d)) break;
 				add(d);
 			}
