@@ -1,3 +1,7 @@
+/**
+ * @file scan.cpp
+ * @brief Framework detection by signal strings.
+ */
 #include "core/log.hpp"
 #include "db/segments.hpp"
 #include "framework.hpp"
@@ -13,11 +17,13 @@
 
 namespace rv {
 
+/** @brief A signal found in the binary */
 struct signal_hit_t {
 	const fw_signal_t* sig;
 	ea_t ea;
 };
 
+/** @brief Minimum score for a framework to count as detected */
 static constexpr int FW_THRESHOLD = 10;
 
 const FrameworkModule* get_framework_module(Framework fw) {
@@ -29,6 +35,7 @@ const FrameworkModule* get_framework_module(Framework fw) {
 	}
 }
 
+/** @brief Compiles the literal @p lit into a binary search pattern */
 static bool compile(compiled_binpat_vec_t& out, const char* lit) {
 	qstring text, err;
 	text.sprnt("\"%s\"", lit);
@@ -62,6 +69,7 @@ ea_t find_fw_string(const char* lit) {
 	return BADADDR;
 }
 
+/** @brief Searches every module's signals */
 static std::vector<signal_hit_t> find_fw_signals() {
 
 	std::vector<signal_hit_t> hits;

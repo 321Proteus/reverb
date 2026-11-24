@@ -14,7 +14,11 @@ static constexpr fw_signal_t signals[] = {
 };
 // clang-format on
 
-// SystemStats::getJUCEVersion() embeds "JUCE v<major>.<minor>.<build>"
+/**
+ * @brief Reads the version from `SystemStats::getJUCEVersion()`, which embeds
+ * `"JUCE v<major>.<minor>.<build>"` (`juce_version_<major>_<minor>_<build>` in
+ * JUCE 6 and later)
+ */
 static qstring detect_version() {
 	ea_t ea = find_fw_string("JUCE v");
 
