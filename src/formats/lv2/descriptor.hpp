@@ -50,8 +50,9 @@ std::vector<desc_t> find_descriptors(ea_t getter, const desc_kind_t& kind);
 /*
 	Types and names the descriptor, its callbacks and extension tables, and
 	adds its report section. If unique is set to true, the descriptor is treated
-	as the only of its kind (callbacks are not named by URI)
+	as the only of its kind (callbacks are not named by URI).
+	-> the name of its instance struct, empty when it has none
 */
-void label_descriptor(const desc_t& d, bool unique);
+qstring label_descriptor(const desc_t& d, bool unique);
 
 } // namespace rv::lv2

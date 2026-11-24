@@ -5,6 +5,8 @@ target_sources(reverb PRIVATE
     extensions.hpp
     features.cpp
     features.hpp
+    handles.cpp
+    handles.hpp
     instance.cpp
     instance.hpp
     lv2.hpp

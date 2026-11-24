@@ -163,7 +163,7 @@ static qstring uri_ident(const qstring& uri) {
 	return s;
 }
 
-void label_descriptor(const desc_t& d, bool unique) {
+qstring label_descriptor(const desc_t& d, bool unique) {
 	const desc_kind_t& kind = *d.kind;
 	const qstring id = uri_ident(d.uri);
 
@@ -186,7 +186,7 @@ void label_descriptor(const desc_t& d, bool unique) {
 	tinfo_t tif;
 	udt_type_data_t udt;
 	if (!tif.get_named_type(nullptr, kind.type) || !tif.get_udt_details(&udt))
-		return;
+		return {};
 
 	// Callbacks in member order
 	for (const udm_t& m : udt) {
@@ -205,15 +205,20 @@ void label_descriptor(const desc_t& d, bool unique) {
 	}
 
 	label_features(member_ptr(d.ea, tif, "instantiate"), d.features);
-	if (d.has_instance)
-		label_instance(d.instance, (prefix + "_instance").c_str());
+	qstring inst_type;
+	if (d.has_instance) {
+		inst_type = prefix + "_instance";
+		label_instance(d.instance, inst_type.c_str());
+	}
 
-	if (d.exts.fn == BADADDR) return;
+	if (d.exts.fn == BADADDR) return inst_type;
 
 	if (d.exts_shared)
 		report::row("extensions", "(shared, see above)", d.exts.fn);
 	else
 		label_extensions(d.exts);
+
+	return inst_type;
 }
 
 } // namespace rv::lv2

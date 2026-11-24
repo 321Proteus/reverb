@@ -1,6 +1,7 @@
 #include "lv2.hpp"
 #include "descriptor.hpp"
 #include "features.hpp"
+#include "handles.hpp"
 #include "core/log.hpp"
 #include "db/func_iter.hpp"
 #include "db/members.hpp"
@@ -150,8 +151,30 @@ static void label_lib_table(ea_t t) {
 		report::addr_row(m, member_ptr(t, tif, m));
 }
 
-static void label_descriptors(
-	const std::vector<desc_t>& descs, const desc_kind_t& kind, ea_t getter) {
+// The extension tables of the descriptor that scanned extension_data first
+static const ext_scan_t* scanned_exts(ea_t ed) {
+	for (const auto* v : { &g_state.plugins, &g_state.uis })
+		for (const desc_t& d : *v)
+			if (d.exts.fn == ed && !d.exts_shared) return &d.exts;
+	return nullptr;
+}
+
+// The descriptor and its extension tables, for type_handles
+static void add_handle_uses(
+	const desc_t& d, const qstring& inst, std::vector<handle_use_t>& uses) {
+	uses.push_back({ d.ea, d.kind->type, inst });
+
+	const ext_scan_t* x = d.exts_shared ? scanned_exts(d.exts.fn) : &d.exts;
+	if (x == nullptr) return;
+
+	for (const ext_t& e : x->exts)
+		if (e.kind != nullptr) uses.push_back({ e.ea, e.kind->type, inst });
+}
+
+// The descriptors one getter returned (lv2_descriptor, get_plugin or
+// lv2ui_descriptor), or a "not found" section
+static void label_getter(const std::vector<desc_t>& descs,
+	const desc_kind_t& kind, ea_t getter, std::vector<handle_use_t>& uses) {
 
 	if (getter == BADADDR) return;
 
@@ -164,8 +187,11 @@ static void label_descriptors(
 		return;
 	}
 
-	for (const desc_t& d : descs)
-		label_descriptor(d, descs.size() == 1);
+	for (const desc_t& d : descs) {
+		const qstring inst = label_descriptor(d, descs.size() == 1);
+		if (!inst.empty()) add_handle_uses(d, inst, uses);
+	}
+
 	mark_cfunc_dirty(getter);
 }
 
@@ -184,12 +210,17 @@ void label() {
 
 	if (s.lib_table != BADADDR) label_lib_table(s.lib_table);
 
-	label_descriptors(s.plugins, PLUGIN,
+	std::vector<handle_use_t> uses;
+	label_getter(s.plugins, PLUGIN,
 		s.desc != BADADDR ? s.desc
 		: s.lib_table != BADADDR
 			? member_ptr(s.lib_table, "LV2_Lib_Descriptor", "get_plugin")
-			: BADADDR);
-	label_descriptors(s.uis, UI, s.ui);
+			: BADADDR,
+		uses);
+	label_getter(s.uis, UI, s.ui, uses);
+
+	// A callback shared by several descriptors is only seen whole here
+	type_handles(uses);
 }
 
 } // namespace rv::lv2
