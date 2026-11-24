@@ -6,6 +6,7 @@
 #include "vst3_types_embed.h"
 #include "formats/clap/clap.hpp"
 #include "clap_types_embed.h"
+#include "formats/lv2/lv2.hpp"
 #include "core/reverb.hpp"
 
 namespace rv {
@@ -17,7 +18,7 @@ static const FormatModule kVst2 = { RV_VST2_TYPES_SRC, &vst2::scan,
 static const FormatModule kClap = { RV_CLAP_TYPES_SRC, &clap::scan,
 	&clap::label };
 
-static const FormatModule kLv2 = { "", nullptr, nullptr };
+static const FormatModule kLv2 = { nullptr, &lv2::scan, &lv2::label };
 
 const FormatModule* get_format_module(Interface iface) {
 	switch (iface) {
