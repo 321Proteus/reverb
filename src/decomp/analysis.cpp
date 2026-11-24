@@ -177,6 +177,22 @@ bool apply_definite_proto(ea_t ea, const char* decl) {
 	return apply_tinfo(ea, tif, TINFO_DEFINITE);
 }
 
+bool set_arg_type(ea_t ea, int idx, const tinfo_t& type) {
+	tinfo_t ft;
+	if (!get_tinfo(&ft, ea)) {
+		cfuncptr_t cf = decompile_at(ea);
+		if (cf == nullptr || !cf->get_func_type(&ft)) return false;
+	}
+
+	func_type_data_t fi;
+	if (!ft.get_func_details(&fi) || idx < 0 || size_t(idx) >= fi.size())
+		return false;
+
+	fi[idx].type = type; // name and argloc stay
+	tinfo_t out;
+	return out.create_func(fi) && apply_tinfo(ea, out, TINFO_DEFINITE);
+}
+
 bool set_lvar(
 	ea_t func_ea, const lvar_t& v, const char* name, const tinfo_t* type) {
 	lvar_saved_info_t lsi;

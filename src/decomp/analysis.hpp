@@ -42,6 +42,13 @@ ea_t direct_tail_callee(ea_t ea, bool* indirect = nullptr);
 // Parse a C declaration and apply it as a user-defined (definite) type.
 bool apply_definite_proto(ea_t ea, const char* decl);
 
+/*
+	Retype arg idx of the function at ea, keeping the rest of its
+	prototype: the one set on it, or the one Hex-Rays guessed. Applied as
+	definite. True if the argument count matches
+*/
+bool set_arg_type(ea_t ea, int idx, const tinfo_t& type);
+
 // Persistently rename and/or retype a decompiler local variable.
 bool set_lvar(
 	ea_t func_ea, const lvar_t& v, const char* name, const tinfo_t* type);
