@@ -553,12 +553,22 @@ void store_collector_t::inline_callee(cexpr_t* call) {
 	if (ccf == nullptr || ccf->argidx.empty()) return;
 
 	store_collector_t sub(&*ccf);
+	sub.inline_calls = inline_depth > 1;
+	sub.inline_depth = inline_depth - 1;
+	sub.bind_locals = bind_locals;
+
+	std::map<int, loc_t> passed; // callee parameter -> caller local
+
 	const size_t n = std::min(call->a->size(), ccf->argidx.size());
 	for (size_t i = 1; i < n; i++) {
 		const val_t v = value_of(&call->a->at(i));
+
 		if (v.t == val_t::NUM || v.t == val_t::ADDR || v.t == val_t::STR)
 			sub.var_vals[ccf->argidx[i]] = v;
+		else if (bind_locals && v.t == val_t::LOCAL)
+			passed[ccf->argidx[i]] = v.loc;
 	}
+
 	sub.apply_to(&ccf->body, nullptr);
 
 	// The callee's this, moved to base; other callee locals mean nothing here
@@ -568,8 +578,12 @@ void store_collector_t::inline_callee(cexpr_t* call) {
 		s.loc = loc_t{ base.var, base.off + s.loc.off };
 
 		if (s.val.t == val_t::LOCAL) {
+			auto p = passed.find(s.val.loc.var);
 			if (s.val.loc.var == self)
 				s.val.loc = loc_t{ base.var, base.off + s.val.loc.off };
+			else if (p != passed.end())
+				s.val.loc =
+					loc_t{ p->second.var, p->second.off + s.val.loc.off };
 			else
 				s.val = val_t{};
 		}

@@ -133,6 +133,16 @@ struct store_collector_t : public ctree_visitor_t {
 	// Add what direct callees store through their first argument
 	bool inline_calls = false;
 
+	// Levels of calls inline_calls follows (a constructor calling a member's)
+	int inline_depth = 1;
+
+	/*
+		A callee parameter that gets a caller's local (a pointer passed on)
+		stands for that local in the callee's stored values. Otherwise
+		such values are UNKNOWN
+	*/
+	bool bind_locals = false;
+
 	/*
 		Strings copied into objects: strcpy calls, inlined strncpy and copy
 		loops. Size 0, until a layout tells how wide the field is. val is
