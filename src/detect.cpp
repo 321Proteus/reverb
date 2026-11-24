@@ -36,7 +36,10 @@ rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
 			found.add(rv::Interface::AU);
 			break;
 		case str_cth("lv2_descriptor"):
+		case str_cth("lv2_lib_descriptor"):
+		case str_cth("lv2ui_descriptor"):
 			found.add(rv::Interface::LV2);
+			break;
 
 		}
 	}
