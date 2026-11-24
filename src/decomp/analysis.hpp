@@ -43,9 +43,10 @@ ea_t direct_tail_callee(ea_t ea, bool* indirect = nullptr);
 bool apply_definite_proto(ea_t ea, const char* decl);
 
 /*
-	Retype arg idx of the function at ea, keeping the rest of its
-	prototype: the one set on it, or the one Hex-Rays guessed. Applied as
-	definite. True if the argument count matches
+	Retype arg idx of the function at ea. With a prototype set, the rest
+	of it is kept and the result applied as definite. Without one, only
+	the parameter's decompiler local is retyped, so Hex-Rays keeps guessing
+	the others. True if the argument count matches
 */
 bool set_arg_type(ea_t ea, int idx, const tinfo_t& type);
 

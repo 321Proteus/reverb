@@ -181,7 +181,10 @@ bool set_arg_type(ea_t ea, int idx, const tinfo_t& type) {
 	tinfo_t ft;
 	if (!get_tinfo(&ft, ea)) {
 		cfuncptr_t cf = decompile_at(ea);
-		if (cf == nullptr || !cf->get_func_type(&ft)) return false;
+		if (cf == nullptr || idx < 0 || size_t(idx) >= cf->argidx.size())
+			return false;
+		const lvar_t& v = cf->get_lvars()->at(cf->argidx[idx]);
+		return set_lvar(ea, v, nullptr, &type);
 	}
 
 	func_type_data_t fi;
