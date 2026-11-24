@@ -79,6 +79,8 @@ struct feature_store_t {
 struct store_finder_t : public ctree_parentee_t {
 	cfunc_t* cf;
 	std::set<int> uri_vars; // u = f->URI
+
+	std::set<int> other_writes;
 	std::vector<feature_store_t> out;
 
 	store_finder_t(cfunc_t* f) : cf(f) {}
@@ -88,8 +90,7 @@ struct store_finder_t : public ctree_parentee_t {
 		for (carg_t& a : *call->a) {
 			const cexpr_t* x = strip_casts(&a);
 			if (feature_member(x, 0) && x->x->equal_effect(*base)) return true;
-			if (x->op == cot_var && uri_vars.count(x->v.idx) != 0)
-				return true;
+			if (x->op == cot_var && uri_vars.count(x->v.idx) != 0) return true;
 		}
 		return false;
 	}
@@ -146,7 +147,11 @@ struct store_finder_t : public ctree_parentee_t {
 			uri_vars.insert(l->v.idx);
 			return 0;
 		}
-		if (!feature_member(r, ptr_size())) return 0;
+		if (!feature_member(r, ptr_size())) {
+			if (l->op == cot_var && r->op != cot_num)
+				other_writes.insert(l->v.idx);
+			return 0;
+		}
 
 		feature_store_t s;
 		s.uri = uri_of(e, r->x);
@@ -198,8 +203,8 @@ static bool data_type(const uri_type_t& f, tinfo_t& out) {
 }
 
 // -> how the destination reads now, for the report
-static qstring apply_store(cfunc_t* cf, const feature_store_t& s,
-	const std::map<int, int>& var_uses) {
+static qstring apply_store(
+	cfunc_t* cf, const feature_store_t& s, const std::map<int, int>& var_uses) {
 
 	const uri_type_t* f = by_uri(FEATURES, s.uri.c_str());
 	tinfo_t t;
@@ -213,7 +218,7 @@ static qstring apply_store(cfunc_t* cf, const feature_store_t& s,
 
 		const lvar_t& v = lv->at(s.var);
 		if (var_uses.at(s.var) > 1) {
-			rv_log("%a: %s holds several features, left untyped", s.ea,
+			rv_log("%a: %s holds other values too, left untyped", s.ea,
 				v.name.c_str());
 			return v.name;
 		}
@@ -243,11 +248,20 @@ void label_features(ea_t inst, const qstrvec_t& features) {
 		store_finder_t sf(cf);
 		sf.apply_to(&cf->body, nullptr);
 
-		std::map<int, int> var_uses; // local -> distinct URIs stored in it
+		// local -> distinct values stored in it: URIs, and one more for
+		// anything else
+		std::map<int, int> var_uses;
 		std::set<std::pair<int, qstring>> seen;
-		for (const feature_store_t& s : sf.out)
-			if (s.dest == feature_store_t::LOCAL && seen.insert({ s.var, s.uri }).second)
+
+		for (const feature_store_t& s : sf.out) {
+			if (s.dest == feature_store_t::LOCAL &&
+				seen.insert({ s.var, s.uri }).second)
 				var_uses[s.var]++;
+		}
+
+		for (int v : sf.other_writes) {
+			if (var_uses.count(v) != 0) var_uses[v]++;
+		}
 
 		for (const feature_store_t& s : sf.out) {
 			const qstring d = apply_store(cf, s, var_uses);
@@ -255,6 +269,7 @@ void label_features(ea_t inst, const qstrvec_t& features) {
 				s.ea);
 			dest.insert({ s.uri, d });
 		}
+
 		if (!sf.out.empty()) mark_cfunc_dirty(inst);
 	}
 
