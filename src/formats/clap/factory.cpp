@@ -1,3 +1,7 @@
+/**
+ * @file factory.cpp
+ * @brief Finding CLAP factories from `get_factory`.
+ */
 #include "factory.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
@@ -48,10 +52,19 @@ bool resolve_table(ea_t& ea, const tinfo_t& tif) {
 	return true;
 }
 
+/**
+ * @brief Whether @p c can be part of a CLAP id
+ */
 static bool id_char(int c) {
 	return qisalnum(c) || c == '.' || c == '-' || c == '_' || c == '/';
 }
 
+/**
+ * @brief The factory id that the string at @p ea spells, the longest if several
+ *
+ * A match followed by another id character belongs to a longer id and is
+ * skipped.
+ */
 static const id_type_t* factory_id_at(ea_t ea) {
 	const id_type_t* best = nullptr;
 
@@ -71,15 +84,24 @@ static const id_type_t* factory_id_at(ea_t ea) {
 	return best;
 }
 
-static constexpr size_t MIN_FRAGMENT = 4;
-static constexpr size_t MAX_FRAGMENT = 16;
+static constexpr size_t MIN_FRAGMENT =
+	4; /**< Shortest text fragment taken for part of an id */
+static constexpr size_t MAX_FRAGMENT =
+	16; /**< Longest fragment: one SIMD load */
 
-// id with its NUL, which SIMD compares check too
+/**
+ * @brief The id of @p k with its NUL, which SIMD compares check too
+ */
 static std::string id_bytes(const id_type_t& k) {
 	return std::string(k.id, strlen(k.id) + 1);
 }
 
-// Up to 16 bytes of text at ea, through the first NUL, that fit a known id
+/**
+ * @brief Reads up to 16 bytes of text at @p ea, through the first NUL, into @p
+ * out
+ *
+ * @return true if they fit a known id
+ */
 static bool read_fragment(ea_t ea, std::string& out) {
 	char buf[MAX_FRAGMENT];
 	if (get_bytes(buf, sizeof(buf), ea) != ssize_t(sizeof(buf))) return false;
@@ -95,10 +117,14 @@ static bool read_fragment(ea_t ea, std::string& out) {
 	return false;
 }
 
-/*
-	The id that pieces compared with SIMD loads come from.
-	A _COMPAT id and its stable id count as one
-*/
+/**
+ * @brief The id that pieces compared with SIMD loads come from
+ *
+ * A `_COMPAT` id and its stable id count as one.
+ *
+ * @param frags The fragments, see read_fragment()
+ * @return The id, or null if none or several different ones fit
+ */
 static const id_type_t* fragment_id(const std::vector<std::string>& frags) {
 	const id_type_t* found = nullptr;
 	for (const id_type_t& k : CLAP_FACTORIES) {
@@ -118,14 +144,21 @@ static const id_type_t* fragment_id(const std::vector<std::string>& frags) {
 	return found;
 }
 
+/**
+ * @brief The factory with the macro name @p name, or null
+ */
 static const id_type_t* factory_by_name(const char* name) {
 	for (const id_type_t& k : CLAP_FACTORIES)
 		if (strcmp(k.name, name) == 0) return &k;
 	return nullptr;
 }
 
-// Fallback when the ctree has no id checks: pair the ids and factory structs
-// that get_factory references
+/**
+ * @brief Fallback when the ctree has no id checks: pairs the ids and factory
+ * structs that `get_factory` references
+ *
+ * @param gf_ea `get_factory`
+ */
 static std::vector<factory_hit_t> xref_factories(ea_t gf_ea) {
 	func_t* pfn = rv::ensure_func(gf_ea);
 	if (pfn == nullptr) return {};

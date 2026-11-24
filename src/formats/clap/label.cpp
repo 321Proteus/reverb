@@ -1,3 +1,7 @@
+/**
+ * @file label.cpp
+ * @brief Naming and typing CLAP function tables and callbacks.
+ */
 #include "label.hpp"
 #include "core/log.hpp"
 #include "db/read.hpp"
@@ -31,7 +35,9 @@ fn_ref_t classify_fn(ea_t fn, ea_t owner, size_t owner_size) {
 	return r;
 }
 
-// A callback that only calls another function: name the callee name_impl
+/**
+ * @brief Names the callee of a callback that only forwards `name_impl`
+ */
 static void label_impl(ea_t fn, const qstring& name) {
 	bool indirect = false;
 	const ea_t impl = rv::direct_tail_callee(fn, &indirect);

@@ -1,3 +1,7 @@
+/**
+ * @file scan.cpp
+ * @brief CLAP scan: `clap_entry` and what it leads to.
+ */
 #include "core/log.hpp"
 #include "clap.hpp"
 #include "factory.hpp"
@@ -15,16 +19,31 @@
 
 namespace rv::clap {
 
+/**
+ * @brief `clap_entry` as read from the database
+ */
 struct entry_info_t {
 	ea_t ea = BADADDR;
 	version_t version{};
 	fn_ref_t init, deinit, get_factory;
 };
 
+/**
+ * @brief Entry found by the last scan()
+ */
 static entry_info_t g_entry;
+/**
+ * @brief Whether #g_entry holds a valid entry
+ */
 static bool g_valid = false;
+/**
+ * @brief Descriptors found by the last scan()
+ */
 static std::vector<desc_t> g_descs;
 
+/**
+ * @brief `clap_entry` by name, with or without the leading underscore
+ */
 static ea_t find_entry() {
 	for (const char* n : { "clap_entry", "_clap_entry" }) {
 		const ea_t ea = get_name_ea(BADADDR, n);
@@ -33,7 +52,10 @@ static ea_t find_entry() {
 	return BADADDR;
 }
 
-// get_plugin_count usually just returns a constant
+/**
+ * @brief Warns if `get_plugin_count` returns a constant that differs from the
+ * @p found descriptors
+ */
 static void check_plugin_count(ea_t factory, size_t found) {
 	const ea_t gpc =
 		member_ptr(factory, "clap_plugin_factory_t", "get_plugin_count");
