@@ -1,3 +1,7 @@
+/**
+ * @file scan.cpp
+ * @brief VST3 scan.
+ */
 #include "core/log.hpp"
 #include "decomp/analysis.hpp"
 #include "factory.hpp"
@@ -7,6 +11,10 @@
 
 namespace rv::vst3 {
 
+/**
+ * @brief Names of the `PFactoryInfo` flags set in @p f, joined by ` | `, or
+ * `none`
+ */
 static qstring factory_flags_str(uint64 f) {
 	static const struct {
 		uint64 bit;
@@ -27,6 +35,10 @@ static qstring factory_flags_str(uint64 f) {
 	return s.empty() ? qstring("none") : s;
 }
 
+/**
+ * @brief Adds the `vendor`, `url`, `email` and `flags` of the `PFactoryInfo` @p
+ * s to the report
+ */
 static void report_factory_info(const factory_struct_t& s) {
 	qstring v;
 	for (const char* f : { "vendor", "url", "email" }) {

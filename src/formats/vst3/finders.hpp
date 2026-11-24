@@ -3,6 +3,14 @@
 #include "cxx/vtable.hpp"
 #include <hexrays.hpp>
 
+/**
+ * @file finders.hpp
+ * @brief Ctree visitors locating the globals a factory is stored in.
+ * @internal Not part of the public API; used within the VST3 module only.
+ */
+/** @cond INTERNAL */
+
+/** @brief Finds the global that the local `target_var_idx` is assigned to */
 struct global_assign_finder_t : public ctree_visitor_t {
 	int target_var_idx;
 	ea_t global_ea = BADADDR;
@@ -26,6 +34,10 @@ struct global_assign_finder_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Finds the global that holds the object built by the constructor
+ * @c ctor_ea: `v5 = ctor(...); global = v5;`
+ */
 struct ctor_global_finder_t : public ctree_visitor_t {
 	ea_t ctor_ea;
 	ea_t global_ea = BADADDR;
@@ -74,3 +86,4 @@ struct ctor_global_finder_t : public ctree_visitor_t {
 		return 0;
 	}
 };
+/** @endcond */

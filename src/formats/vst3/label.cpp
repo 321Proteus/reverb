@@ -1,3 +1,7 @@
+/**
+ * @file label.cpp
+ * @brief Labeling of the VST3 factory.
+ */
 #include <pro.h>
 #include <funcs.hpp>
 #include <hexrays.hpp>
@@ -9,6 +13,10 @@
 #include "decomp/analysis.hpp"
 #include "ui/report.hpp"
 
+/**
+ * @brief Whether the vtable at @p vt can be a factory: its RTTI has an
+ * `IPluginFactory` base, or it has no RTTI
+ */
 static bool may_be_factory(ea_t vt) {
 	rv::rtti::class_info ci;
 	if (!rv::rtti::parse_rtti(vt, &ci)) return true;
