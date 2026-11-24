@@ -134,12 +134,17 @@ static rv::InterfaceSet detect() {
 		if (rv::vst2::check_vst2_ep(main_ea)) formats.add(rv::Interface::VST2);
 	}
 
-	bool from_til = false;
-	if (!formats.empty()) from_til = format_til(true);
-	apply_interfaces(formats, from_til);
+	if (formats.empty()) {
+		rv::set_detected_interfaces(formats);
+		rv::set_detected_framework({});
+	} else {
 
-	rv::set_detected_framework(rv::scan_framework());
-	rv::apply_framework_types(formats, rv::get_detected_framework());
+		bool from_til = format_til(true);
+		apply_interfaces(formats, from_til);
+		rv::set_detected_framework(rv::scan_framework());
+		rv::apply_framework_types(formats, rv::get_detected_framework());
+	}
+
 	return formats;
 }
 
@@ -204,11 +209,6 @@ static ssize_t idaapi idb_event_cb(
 static plugmod_t* idaapi init(void) {
 	if (!init_hexrays_plugin()) {
 		rv_log("Failed to initialize Hex-Rays plugin, skipping");
-		return PLUGIN_SKIP;
-	}
-
-	if (!inf_is_dll()) {
-		rv_log("The program is not an executable, skipping");
 		return PLUGIN_SKIP;
 	}
 
