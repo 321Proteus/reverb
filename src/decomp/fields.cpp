@@ -1,3 +1,7 @@
+/**
+ * @file fields.cpp
+ * @brief Field resolution against struct layouts, see fields.hpp.
+ */
 #include "fields.hpp"
 #include "db/read.hpp"
 #include <algorithm>
@@ -43,6 +47,9 @@ qstring val_str(
 	return s;
 }
 
+/**
+ * @brief Display text of field @p f holding @p v
+ */
 static qstring field_str(const field_desc_t& f, const val_t& v,
 	const object_fields_t& o, const char* self_label) {
 	qstring str, s;

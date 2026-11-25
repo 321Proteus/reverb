@@ -1,3 +1,7 @@
+/**
+ * @file opcode.cpp
+ * @brief VST2 dispatcher opcode analysis.
+ */
 #include "opcode.hpp"
 #include "ui/report.hpp"
 #include "core/log.hpp"
@@ -20,28 +24,43 @@ namespace rv::vst2 {
 
 namespace {
 
-// Buffer size of a string opcode, 0 for others
+/**
+ * @brief Buffer size of the string opcode @p op, 0 for others
+ */
 size_t max_str_len(uint32 op) {
 	for (const str_op_t& s : STRING_OPS)
 		if (s.op == op) return s.max_len;
 	return 0;
 }
 
+/**
+ * @brief Whether @p op is an opcode whose handler returns a constant worth
+ * recording
+ */
 bool is_const_op(uint32 op) {
 	return std::find(std::begin(CONST_OPS), std::end(CONST_OPS), op) !=
 		   std::end(CONST_OPS);
 }
 
+/**
+ * @brief Whether @p v is non-empty and every element is equal
+ */
 bool single_value(const std::vector<uint64>& v) {
 	return !v.empty() &&
 		   std::all_of(v.begin(), v.end(), [&](uint64 r) { return r == v[0]; });
 }
 
-// Source paths from asserts and logging are never names
+/**
+ * @brief Whether @p s is free of path separators: source paths from asserts and
+ * logging are never names
+ */
 bool is_sourcepath(const qstring& s) {
 	return s.find('/') == qstring::npos && s.find('\\') == qstring::npos;
 }
 
+/**
+ * @brief Collects the strings and constants a case body produces for one opcode
+ */
 struct harvest_t {
 	bool want_str;
 	bool want_const;
@@ -123,6 +142,13 @@ struct harvest_t {
 	}
 };
 
+/**
+ * @brief Records what the case @p c does: strings of name opcodes, constants of
+ * version and category opcodes, `effCanDo` strings
+ *
+ * @param c   Dispatcher case
+ * @param out Receives the findings
+ */
 void harvest(const dispatch_case_t& c, dispatcher_info_t& out) {
 	const uint32 op = uint32(c.sel);
 	if (!out.handled.insert(op).second) return; // outer level already has it
@@ -153,7 +179,10 @@ void harvest(const dispatch_case_t& c, dispatcher_info_t& out) {
 
 // ------------------------------------------------------- vtable from entry
 
-// Direct calls that pass the audioMaster var (or a copy of it)
+/**
+ * @brief Finds the direct calls that pass the `audioMaster` var (or a copy of
+ * it)
+ */
 struct am_call_finder_t : public ctree_visitor_t {
 	std::set<int> am;
 	struct call_t {
@@ -182,8 +211,17 @@ struct am_call_finder_t : public ctree_visitor_t {
 	}
 };
 
-// VSTPluginMain -> [createEffectInstance] -> Plugin::Plugin(this, audioMaster)
-// The first callee taking audioMaster next to an object is the constructor.
+/**
+ * @brief Finds the plugin object vtable below @p fn_ea
+ *
+ * `VSTPluginMain` -> [`createEffectInstance`] -> `Plugin::Plugin(this,
+ * audioMaster)`. The first callee taking `audioMaster` next to an object is the
+ * constructor.
+ *
+ * @param fn_ea  Function to search
+ * @param am_pos Argument position of `audioMaster` in @p fn_ea
+ * @param depth  Current call depth, limited by `MAX_ENTRY_DEPTH`
+ */
 ea_t find_vtable_from(ea_t fn_ea, int am_pos, int depth) {
 	if (depth > MAX_ENTRY_DEPTH) return BADADDR;
 
@@ -260,6 +298,9 @@ bool analyze_dispatcher(
 	return !out.handled.empty();
 }
 
+/**
+ * @brief Adds the findings of @p infos to the report
+ */
 static void prepare_report(const std::vector<dispatcher_info_t>& infos) {
 	const dispatcher_info_t& first = infos.front();
 

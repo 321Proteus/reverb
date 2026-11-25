@@ -1,3 +1,7 @@
+/**
+ * @file scan.cpp
+ * @brief VST2 scan.
+ */
 #include "core/log.hpp"
 #include "opcode.hpp"
 #include "decomp/analysis.hpp"
@@ -22,9 +26,11 @@
 #include "db/types.hpp"
 #include "ui/report.hpp"
 
-// Calls cb(ea) for every aligned occurrence of x in the loaded
-// image, excluding matches that sit inside instructions (find_imm already
-// covers those).
+/**
+ * @brief Calls @p cb(ea) for every aligned occurrence of @p x in the loaded
+ * image, excluding matches that sit inside instructions (find_imm already
+ * covers those)
+ */
 template <typename F>
 static void iterate_magic_dword(F&& cb, uint32 x = VST2_MAGIC) {
 
@@ -60,6 +66,14 @@ static void iterate_magic_dword(F&& cb, uint32 x = VST2_MAGIC) {
 	}
 }
 
+/**
+ * @brief Collects the functions that may build an `AEffect`: those with the
+ * VST2 magic as an immediate, or referencing it in data
+ *
+ * Waits for auto-analysis first.
+ *
+ * @param funcs Receives the function start addresses
+ */
 static void find_candidates(std::set<ea_t>& funcs) {
 
 	char buf[256];
@@ -117,12 +131,13 @@ static void find_candidates(std::set<ea_t>& funcs) {
 
 namespace rv::vst2 {
 
-/*
-	Most derived vtables of the object behind an AEffect. When the AEffect
-	initializer stores its own object as AEffect::object, it is a constructor
-   and the classes built on top of it are the plugin classes. Otherwise follow
-   audioMaster from the entry point.
-*/
+/**
+ * @brief Most derived vtables of the object behind an `AEffect`
+ *
+ * When the `AEffect` initializer stores its own object as `AEffect::object`, it
+ * is a constructor and the classes built on top of it are the plugin classes.
+ * Otherwise follows `audioMaster` from the entry point.
+ */
 static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 	auto o = h.fields.find("object");
 
@@ -145,10 +160,10 @@ static std::vector<ea_t> plugin_vtables(const aeffect_hit_t& h) {
 	return { vt };
 }
 
-/*
-	Callbacks that only call a method of AEffect::object get their method
-	named vst2_<field>_impl
-*/
+/**
+ * @brief Names the method of `AEffect::object` that a callback only forwards to
+ * `vst2_<field>_impl`
+ */
 static void label_impls(const aeffect_hit_t& h, ea_t vtable, int64 object_off) {
 	obj_tracker_t obj;
 	obj.src_off = object_off;

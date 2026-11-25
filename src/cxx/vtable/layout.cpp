@@ -1,3 +1,7 @@
+/**
+ * @file layout.cpp
+ * @brief Raw vtable layout helpers, see layout.hpp.
+ */
 #include "layout.hpp"
 #include "db/segments.hpp"
 #include "db/read.hpp"

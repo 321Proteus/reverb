@@ -1,3 +1,7 @@
+/**
+ * @file analysis.cpp
+ * @brief On-demand function analysis and decompilation helpers.
+ */
 #include "analysis.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
@@ -42,6 +46,9 @@ cfuncptr_t decompile_at(ea_t ea, int flags) {
 	return cf;
 }
 
+/**
+ * @brief Target of a tiny function that only jumps elsewhere, or BADADDR
+ */
 static ea_t jump_stub_target(func_t* f) {
 	constexpr int MAX_STUB_INSNS = 3;
 	constexpr asize_t MAX_STUB_SIZE = 16;

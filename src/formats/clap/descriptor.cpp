@@ -1,3 +1,7 @@
+/**
+ * @file descriptor.cpp
+ * @brief Reading, finding and labeling CLAP plugin descriptors.
+ */
 #include "descriptor.hpp"
 #include "label.hpp"
 #include "core/log.hpp"
@@ -16,18 +20,31 @@
 
 namespace rv::clap {
 
+/**
+ * @brief Longest feature list accepted
+ */
 static constexpr int MAX_FEATURES = 64;
+/**
+ * @brief Most functions tried as descriptor initializers
+ */
 static constexpr int MAX_INIT_FUNCS = 16;
-static constexpr int CELL_SCAN = 256; // bytes of a lazy cell searched for
-									  // its init function
+static constexpr int CELL_SCAN =
+	256; /**< Bytes of a lazy cell searched for its init function */
 
+/**
+ * @brief Layout of `clap_plugin_descriptor_t` from the local types
+ */
 static layout_t desc_layout() {
 	layout_t layout;
 	load_layout("clap_plugin_descriptor_t", layout);
 	return layout;
 }
 
-// NULL-terminated array of strings
+/**
+ * @brief Reads a NULL-terminated array of feature strings at @p ea
+ *
+ * @return false if it is unreadable or longer than #MAX_FEATURES
+ */
 static bool read_features(ea_t ea, qstrvec_t& out) {
 	for (int i = 0; i <= MAX_FEATURES; i++) {
 		const ea_t slot = ea + i * ptr_size();
@@ -43,9 +60,22 @@ static bool read_features(ea_t ea, qstrvec_t& out) {
 	return false;
 }
 
-// Reads size bytes at a byte offset into the descriptor
+/**
+ * @brief Reads @p size bytes at byte offset @p off into the descriptor
+ */
 typedef std::function<bool(int64 off, int size, uint64& out)> field_reader_t;
 
+/**
+ * @brief Validates and reads a descriptor of type @p tif through @p rd
+ *
+ * Checks are ordered cheapest first: the `clap_version` fields, then the string
+ * members, each NULL (unknown counts as NULL) or a valid string.
+ *
+ * @param tif Type of `clap_plugin_descriptor_t`
+ * @param rd  Reader of the descriptor bytes (database or stores)
+ * @param d   Receives the descriptor
+ * @return false if it does not look like a descriptor
+ */
 static bool parse_descriptor(
 	const tinfo_t& tif, const field_reader_t& rd, desc_t& d) {
 
@@ -111,12 +141,14 @@ bool read_descriptor(ea_t ea, const tinfo_t& tif, desc_t& out) {
 	return true;
 }
 
-/*
-	Functions that may fill a descriptor in: get_plugin_descriptor itself (a
-	local static initialized inline), its direct callees, and the init
-	functions in the data it references (a Rust lazy static keeps its init
-	function in the cell, which get_plugin_descriptor reaches through the GOT)
-*/
+/**
+ * @brief Functions that may fill a descriptor in
+ *
+ * `get_plugin_descriptor` itself (a local static initialized inline), its
+ * direct callees, and the init functions in the data it references (a Rust lazy
+ * static keeps its init function in the cell, which `get_plugin_descriptor`
+ * reaches through the GOT).
+ */
 static std::vector<ea_t> init_candidates(ea_t gpd_ea) {
 	std::vector<ea_t> out{ gpd_ea };
 	auto add = [&](ea_t ea) {
@@ -156,7 +188,13 @@ static std::vector<ea_t> init_candidates(ea_t gpd_ea) {
 	return out;
 }
 
-// Descriptors built by stores in fn, found at their id store
+/**
+ * @brief Descriptors built by stores in @p fn, found at their `id` store
+ *
+ * @param fn  Function to decompile
+ * @param tif Type of `clap_plugin_descriptor_t`
+ * @param out Descriptors found are appended
+ */
 static void from_stores(ea_t fn, const tinfo_t& tif, std::vector<desc_t>& out) {
 	cfuncptr_t cf = rv::decompile_at(fn);
 	uint64 id_off;
@@ -199,6 +237,9 @@ static void from_stores(ea_t fn, const tinfo_t& tif, std::vector<desc_t>& out) {
 	}
 }
 
+/**
+ * @brief Whether the @p sz bytes at @p ea are in a data segment and all zero
+ */
 static bool zero_filled(ea_t ea, size_t sz) {
 	if (!in_data_seg(ea) || !is_loaded(ea + sz - 1)) return false;
 	for (size_t i = 0; i < sz; i++)
@@ -206,10 +247,14 @@ static bool zero_filled(ea_t ea, size_t sz) {
 	return true;
 }
 
-/*
-	The one zero-filled, descriptor-sized object get_plugin_descriptor returns:
-	storage that the init function fills in
-*/
+/**
+ * @brief The one zero-filled, descriptor-sized object `get_plugin_descriptor`
+ * returns: storage that the init function fills in
+ *
+ * @param gpd_ea `get_plugin_descriptor`
+ * @param sz     Size of the descriptor struct
+ * @return Its address, or BADADDR
+ */
 static ea_t zero_storage(ea_t gpd_ea, size_t sz) {
 	cfuncptr_t cf = rv::decompile_at(gpd_ea);
 	if (cf == nullptr) return BADADDR;
@@ -316,6 +361,9 @@ std::vector<desc_t> find_descriptors(ea_t gpd_ea) {
 	return out;
 }
 
+/**
+ * @brief @p s, or `(none)` if empty, for the report
+ */
 static const char* or_none(const qstring& s) {
 	return s.empty() ? "(none)" : s.c_str();
 }

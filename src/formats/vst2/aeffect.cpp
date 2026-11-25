@@ -1,3 +1,7 @@
+/**
+ * @file aeffect.cpp
+ * @brief Extraction and labeling of `AEffect` structs.
+ */
 #include "aeffect.hpp"
 #include "core/log.hpp"
 #include "db/segments.hpp"
@@ -19,6 +23,9 @@ namespace rv::vst2 {
 
 namespace {
 
+/**
+ * @brief Names of the `AEffect` flags set in @p f, joined by ` | `, or `none`
+ */
 qstring flags_str(uint32 f) {
 	static const struct {
 		uint32 bit;
@@ -42,12 +49,19 @@ qstring flags_str(uint32 f) {
 	return s.empty() ? qstring("none") : s;
 }
 
+/**
+ * @brief Whether the local type @p name exists
+ */
 bool type_exists(const char* name) {
 	tinfo_t t;
 	return t.get_named_type(get_idati(), name);
 }
 
-// Callback prototypes from aeffect.h
+/**
+ * @brief Callback prototype of the `AEffect` member @p field, from `aeffect.h`
+ *
+ * @return The declaration, empty for members that are not callbacks
+ */
 qstring proto_for(const char* field) {
 	const bool is64 = inf_is_64bit();
 	const char* ip =

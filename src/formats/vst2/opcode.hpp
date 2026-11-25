@@ -6,6 +6,13 @@
 #include <vector>
 #include <set>
 
+/**
+ * @file opcode.hpp
+ * @brief Analysis of the VST2 dispatcher: which opcodes it handles and what it
+ * returns for them.
+ */
+
+/** @cond INTERNAL */
 constexpr int MAX_DEPTH = 4;
 constexpr int MAX_HARVEST_DEPTH = 2;
 constexpr int MAX_ENTRY_DEPTH = 2;
@@ -40,35 +47,59 @@ inline const char* category_name(uint64 c) {
 	return c < qnumber(cat_names) ? cat_names[c] : "???";
 }
 
+/** @endcond */
+
 namespace rv::vst2 {
 
-// Dispatcher opcode handling
+/**
+ * @brief What the dispatcher does with the opcodes
+ */
 struct dispatcher_info_t {
-	ea_t dispatcher = BADADDR;	// AEffect::dispatcher
-	ea_t switch_func = BADADDR; // first function with a real opcode switch
-	ea_t vtable = BADADDR;		// plugin object vtable used for virtual calls
-	qstring class_name;			// from RTTI, if present
-	std::set<uint32> handled;	// opcodes with a dedicated case
-	std::map<uint32, qstring> strings; // effGetEffectName etc. -> literal
-	std::map<uint32, uint64> consts;   // effGetVstVersion etc. -> return value
-	std::vector<qstring> can_do;	   // strings seen in effCanDo
+	ea_t dispatcher = BADADDR;	/**< `AEffect::dispatcher` */
+	ea_t switch_func = BADADDR; /**< First function with a real opcode switch */
+	ea_t vtable = BADADDR; /**< Plugin object vtable used for virtual calls */
+	qstring class_name;	   /**< From RTTI, if present */
+	std::set<uint32> handled; /**< Opcodes with a dedicated case */
+	std::map<uint32, qstring>
+		strings; /**< `effGetEffectName` etc. -> literal */
+	std::map<uint32, uint64>
+		consts;					 /**< `effGetVstVersion` etc. -> return value */
+	std::vector<qstring> can_do; /**< Strings seen in `effCanDo` */
 };
 
-// Most derived vtable of the plugin object, found by following the
-// audioMaster argument from the VST2 entry point to the constructor.
+/**
+ * @brief Most derived vtable of the plugin object, found by following the
+ * `audioMaster` argument from the VST2 entry point to the constructor
+ *
+ * @param entry_ea VST2 entry point
+ * @return The vtable address point, or BADADDR
+ */
 ea_t find_plugin_vtable(ea_t entry_ea);
 
-/*
-	Walk the dispatcher, following direct and virtual forwarding calls.
-	object_off: byte offset of AEffect::object (-1 if unknown).
-*/
+/**
+ * @brief Walks the dispatcher, following direct and virtual forwarding calls
+ *
+ * @param dispatcher_ea Dispatcher function
+ * @param vtable        Plugin object vtable, or BADADDR
+ * @param object_off    Byte offset of `AEffect::object` (-1 if unknown)
+ * @param out           Receives the result
+ * @return false if the dispatcher cannot be analyzed
+ */
 bool analyze_dispatcher(
 	ea_t dispatcher_ea, ea_t vtable, int64 object_off, dispatcher_info_t& out);
 
-// Results for one dispatcher; several when a shell plugin shares it
+/**
+ * @brief Writes the findings as a comment on the dispatcher: object class,
+ * opcode strings and constants, `effCanDo` strings
+ *
+ * @param infos One entry per dispatcher result, several when a shell plugin
+ * shares it
+ */
 void apply_dispatcher(const std::vector<dispatcher_info_t>& infos);
 
-// Opcode name from the VstOpcode enum in local types, or "opcode_N"
+/**
+ * @brief Opcode name from the `VstOpcode` enum in local types, or `opcode_N`
+ */
 qstring opcode_name(uint32 op);
 
 } // namespace rv::vst2

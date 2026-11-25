@@ -9,24 +9,30 @@ namespace rv {
 
 namespace {
 
-/*
-	Where the returned pointer points: (object var, this offset). Follows
-	non-constant locals assigned once from an address, e.g.
-		result = v2 + 24; return result;
-	A returned local assigned more than once is not followed
-	(it would read as itself at +0). A constant step of the returned local
-	counts toward the offset, scaled by what result points to
-*/
+/**
+ * @brief Finds where the returned pointer points: (object var, this offset)
+ *
+ * Follows non-constant locals assigned once from an address, e.g.
+ * `result = v2 + 24; return result;`. A returned local assigned more than once
+ * is not followed (it would read as itself at +0). A constant step of the
+ * returned local counts toward the offset, scaled by what `result` points to.
+ */
 struct return_loc_finder_t : public ctree_visitor_t {
-	std::map<int, int> asg_count;
-	alias_map_t alias;
-	std::set<int> reassigned;
-	std::map<int, int64> bump; // local -> bytes it was stepped by
-	std::vector<cexpr_t*> rets;
+	std::map<int, int> asg_count; /**< Assignments per local */
+	alias_map_t alias;			  /**< Locals assigned once from an address */
+	std::set<int> reassigned; /**< Locals assigned more than once, or stepped by
+								 an unknown size */
+	std::map<int, int64> bump;	/**< Local -> bytes it was stepped by */
+	std::vector<cexpr_t*> rets; /**< Returned expressions */
 
 	return_loc_finder_t() : ctree_visitor_t(CV_FAST) {}
 
-	// ++v, v -= 2...: true when e steps a local by a constant
+	/**
+	 * @brief Handles `++v`, `v -= 2` and the like: records the step of a local
+	 * by a constant
+	 *
+	 * @return true if @p e is such a step
+	 */
 	bool step(cexpr_t* e) {
 		int64 n;
 		switch (e->op) {
@@ -87,6 +93,11 @@ struct return_loc_finder_t : public ctree_visitor_t {
 		return 0;
 	}
 
+	/**
+	 * @brief The common target of the non-null returns
+	 *
+	 * @return false if the returns disagree or there are none
+	 */
 	bool get(loc_t& out) {
 		bool have = false;
 

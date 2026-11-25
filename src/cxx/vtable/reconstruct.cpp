@@ -1,3 +1,7 @@
+/**
+ * @file reconstruct.cpp
+ * @brief Pinned vtables and the reconstruction pipeline.
+ */
 #include "reconstruct.hpp"
 #include "apply.hpp"
 #include "core/log.hpp"
@@ -7,6 +11,7 @@
 
 namespace rv::vtbl {
 
+/** Vtables pinned by format modules, consumed by the next reconstruct() */
 static std::vector<std::pair<ea_t, qstring>> g_pinned;
 
 void pin(ea_t vt, const char* vtbl_type) {

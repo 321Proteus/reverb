@@ -1,3 +1,8 @@
+/**
+ * @file factory.cpp
+ * @brief Extraction of `PFactoryInfo` and `PClassInfo2` from the factory
+ * function.
+ */
 #include "factory.hpp"
 #include "core/log.hpp"
 #include "cxx/rtti/abi.hpp"
@@ -28,26 +33,45 @@ void tuid_from_longs(const uint32 (&l)[4], bool com, uchar (&out)[16]) {
 
 namespace {
 
+/**
+ * @brief `kManyInstances`, the `cardinality` that classes use in practice
+ */
 constexpr uint32 MANY_INSTANCES = 0x7FFFFFFF;
 
+/**
+ * @brief `PFactoryInfo` members that are resolved
+ */
 constexpr const char* FACTORY_INFO_MEMBERS[] = { "vendor", "url", "email",
 	"flags" };
 
+/**
+ * @brief `PClassInfo2` members that are resolved
+ */
 constexpr const char* CLASS_INFO_MEMBERS[] = { "cid", "cardinality", "category",
 	"name", "classFlags", "subCategories", "vendor", "version", "sdkVersion" };
 
+/**
+ * @brief A `PFactoryInfo` embedded in a class object: where it sits in the lvar
+ * @c root
+ */
 struct embed_hint_t {
 	int root;
 	int64 base_off;
 	const char* type;
 };
 
-// Adds stores to globals
+/**
+ * @brief A store_collector_t that also records the stores to globals and the
+ * globals the function refers to
+ */
 struct factory_collector_t : public store_collector_t {
-	std::set<ea_t> globals; // every global the function refers to
+	std::set<ea_t> globals; /**< Every global the function refers to */
 
 	factory_collector_t(const cfunc_t* f) : store_collector_t(f) {}
 
+	/**
+	 * @brief Records the assignment @p e to the global @p lhs as a store
+	 */
 	void add_global_store(cexpr_t* e, cexpr_t* lhs) {
 		const size_t sz = lhs->type.get_size();
 		if (sz == BADSIZE) return;
@@ -82,8 +106,18 @@ struct factory_collector_t : public store_collector_t {
 	}
 };
 
-// A char array written as immediates, the bytes of every NUM store that
-// overlaps
+/**
+ * @brief Rebuilds a char array written as immediates: the bytes of every NUM
+ * store that overlaps `[foff, foff + sz)`
+ *
+ * @param stores   Collected stores
+ * @param root     lvar the array lives in
+ * @param foff     Offset of the array
+ * @param sz       Size of the array
+ * @param out      Receives the string
+ * @param last_ea  Receives the address of the last contributing store
+ * @return false if a byte is unknown, the string is not terminated or not text
+ */
 static bool string_image(const std::vector<store_t>& stores, int root,
 	int64 foff, int sz, qstring& out, ea_t& last_ea) {
 	last_ea = BADADDR;
@@ -130,13 +164,19 @@ static bool string_image(const std::vector<store_t>& stores, int root,
 	return false; // not terminated
 }
 
+/**
+ * @brief Whether @p col copied a string to `root + off`
+ */
 bool has_copy(const factory_collector_t& col, int root, int64 off) {
 	for (const store_t& c : col.copies)
 		if (c.loc.var == root && c.loc.off == off) return true;
 	return false;
 }
 
-// The collected stores, plus what only the layout can turn into stores
+/**
+ * @brief The collected stores, plus what only the layout can turn into stores:
+ * strings written as immediates and the copies of fields of @p h
+ */
 std::vector<store_t> stores_for(const factory_collector_t& col,
 	const layout_t& layout, const factory_struct_t& h) {
 	std::vector<store_t> out = col.stores;
@@ -180,6 +220,9 @@ std::vector<store_t> stores_for(const factory_collector_t& col,
 	return out;
 }
 
+/**
+ * @brief Where @p h lives, for the log: a global address, `frame+N` or `varN+M`
+ */
 qstring base_str(const factory_struct_t& h) {
 	qstring s;
 	if (h.root == GLOBAL_ROOT) s.sprnt("%a", ea_t(h.base_off));
@@ -190,13 +233,21 @@ qstring base_str(const factory_struct_t& h) {
 	return s;
 }
 
+/**
+ * @brief Resolves the fields of @p h from the stores of @p col
+ */
 void resolve(const factory_collector_t& col, const layout_t& layout,
 	factory_struct_t& h) {
 	resolve_fields(
 		layout.fields, h, stores_for(col, layout, h), inf_is_64bit());
 }
 
-// cardinality is kManyInstances in practice, which makes it the magic
+/**
+ * @brief Finds the `PClassInfo2` structs by their `cardinality` store
+ *
+ * `cardinality` is `kManyInstances` in practice, which makes it the magic. A
+ * plain `INT_MAX` store is rejected when the category is not a constant string.
+ */
 void find_class_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
@@ -233,6 +284,9 @@ void find_class_infos(
 	}
 }
 
+/**
+ * @brief A NUM store of @p size raw bytes at @p at
+ */
 store_t raw_store(loc_t at, const uchar* raw, int size, ea_t ea) {
 	store_t s = num_store(at, size, 0, ea);
 	memcpy(s.val.raw, raw, size);
@@ -242,7 +296,12 @@ store_t raw_store(loc_t at, const uchar* raw, int size, ea_t ea) {
 	return s;
 }
 
-// FUID rebuilt per byte (f(&tmp, l1, l2, l3, l4))
+/**
+ * @brief Whether the call arguments @p a rebuild an `FUID`: `f(&tmp, l1, l2,
+ * l3, l4)`
+ *
+ * @param l Receives the four longs
+ */
 bool match_uid_builder(const std::vector<call_arg_t>& a, uint32 (&l)[4]) {
 	if (a.size() != 5 || a[0].k != call_arg_t::VAR) return false;
 
@@ -255,8 +314,12 @@ bool match_uid_builder(const std::vector<call_arg_t>& a, uint32 (&l)[4]) {
 	return true;
 }
 
-// A PFactoryInfo that sits in data: vendor is NUL-padded to its full width.
-// A pointer to a bare string breaks the check
+/**
+ * @brief Whether @p ea holds a `PFactoryInfo` in data
+ *
+ * `vendor` is NUL-padded to its full width; a pointer to a bare string breaks
+ * the check.
+ */
 bool looks_like_factory_info(ea_t ea, const layout_t& info) {
 	const field_desc_t *vendor = info.find("vendor"), *url = info.find("url"),
 					   *email = info.find("email"), *flags = info.find("flags");
@@ -276,8 +339,10 @@ bool looks_like_factory_info(ea_t ea, const layout_t& info) {
 		   get_dword(ea + flags->off) <= 0x1F; // kUnicode is the top flag
 }
 
-// A complete PFactoryInfo in data, passed to the factory constructor or copied
-// by an inlined one
+/**
+ * @brief Turns a complete `PFactoryInfo` in data, passed to the factory
+ * constructor or copied by an inlined one, into stores and copies
+ */
 void lower_factory_infos(factory_collector_t& col, const layout_t& info) {
 	for (const ea_t ea : col.globals) {
 		if (!looks_like_factory_info(ea, info)) continue;
@@ -295,13 +360,18 @@ void lower_factory_infos(factory_collector_t& col, const layout_t& info) {
 	}
 }
 
-// The category strings are fixed SDK constants
+/**
+ * @brief The category strings, which are fixed SDK constants
+ */
 constexpr const char* KNOWN_CATEGORIES[] = {
 	"Audio Module Class",
 	"Component Controller Class",
 	"Test Class",
 };
 
+/**
+ * @brief Whether @p a is one of #KNOWN_CATEGORIES
+ */
 bool is_known_category(const call_arg_t& a) {
 	qstring s;
 	if (a.k == call_arg_t::STR) s = a.str;
@@ -315,10 +385,20 @@ bool is_known_category(const call_arg_t& a) {
 	return false;
 }
 
-// PClassInfo2 ctor: (this, cid, cardinality, category, name, classFlags,
-// subCategories, vendor, version, sdkVersion). Anchored on a known category
-// string, or on kManyInstances. A category anchor implies the cardinality, as
-// it may be a non-constant argument
+/**
+ * @brief Turns a call of the `PClassInfo2` constructor into stores
+ *
+ * The constructor takes `(this, cid, cardinality, category, name, classFlags,
+ * subCategories, vendor, version, sdkVersion)`. It is anchored on a known
+ * category string, or on `kManyInstances`. A category anchor implies the
+ * cardinality, as it may be a non-constant argument.
+ *
+ * @param col The collector that receives the stores
+ * @param c   The call
+ * @param cls Layout of `PClassInfo2`
+ * @param uid The `FUID` in effect, or null
+ * @param com Windows (`COM_COMPATIBLE`) TUID layout
+ */
 void lower_class_info(factory_collector_t& col, const call_t& c,
 	const layout_t& cls, const uint32 (*uid)[4], bool com) {
 	const std::vector<call_arg_t>& A = c.args;
@@ -400,8 +480,12 @@ void lower_class_info(factory_collector_t& col, const call_t& c,
 	}
 }
 
-// Calls are in visit order, so the uid in effect is the last builder before
-// each constructor
+/**
+ * @brief Lowers the calls of the function into stores
+ *
+ * Calls are in visit order, so the uid in effect is the last builder before
+ * each constructor.
+ */
 void lower_call_args(
 	factory_collector_t& col, const std::vector<call_t>& calls) {
 	layout_t cls, info;
@@ -423,11 +507,14 @@ void lower_call_args(
 	}
 }
 
-/*
-	PFactoryInfo has no magic, but three strings at fixed distances are rare.
-	The strings of consecutive PClassInfo2s can line up the same way, so
-   anything inside the class infos found so far doesn't count
-*/
+/**
+ * @brief Finds the `PFactoryInfo` structs by the string copies of `vendor`,
+ * `url` and `email` at fixed distances
+ *
+ * `PFactoryInfo` has no magic, but three strings at fixed distances are rare.
+ * The strings of consecutive `PClassInfo2`s can line up the same way, so
+ * anything inside the class infos found so far (@p out) doesn't count.
+ */
 void find_factory_infos(
 	const factory_collector_t& col, std::vector<factory_struct_t>& out) {
 
@@ -471,6 +558,10 @@ void find_factory_infos(
 	}
 }
 
+/**
+ * @brief Finds the classes whose object embeds a `PFactoryInfo`, from the
+ * vtable stores of @p cf and the type of the class
+ */
 std::vector<embed_hint_t> get_embedded(cfunc_t* cf) {
 	std::vector<embed_hint_t> out;
 

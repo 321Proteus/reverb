@@ -1,3 +1,7 @@
+/**
+ * @file plugin.cpp
+ * @brief Finding `clap_plugin_t` instances and labeling their callbacks.
+ */
 #include "plugin.hpp"
 #include "exts.hpp"
 #include "factory.hpp"
@@ -20,25 +24,40 @@
 
 namespace rv::clap {
 
-static constexpr int MIN_FNS = 4; // callbacks to accept a store-built instance
-static constexpr int MAX_FUNCS = 32; // functions walked from create_plugin
+static constexpr int MIN_FNS =
+	4; /**< Callbacks needed to accept a store-built instance */
+static constexpr int MAX_FUNCS =
+	32; /**< Functions walked from `create_plugin` */
+/**
+ * @brief Call depth followed from `create_plugin`
+ */
 static constexpr int MAX_DEPTH = 2;
 
+/**
+ * @brief The `clap_plugin_t` type, its members and layout
+ */
 struct plugin_type_t {
 	tinfo_t tif;
 	udt_type_data_t udt;
-	layout_t layout; // for the field dump
-	int64 desc_off = 0;
+	layout_t layout;	/**< Layout for the field dump */
+	int64 desc_off = 0; /**< Offset of the `desc` member */
 };
 
+/**
+ * @brief A `clap_plugin_t` instance found in the binary
+ */
 struct plugin_hit_t {
-	ea_t func = BADADDR; // function that stores the callbacks
-	ea_t ea = BADADDR;	 // static template, when not built by stores
-	ea_t cmt_ea = BADADDR;
-	const desc_t* desc = nullptr;
-	std::map<qstring, ea_t> fns; // member -> callback
+	ea_t func = BADADDR;   /**< Function that stores the callbacks */
+	ea_t ea = BADADDR;	   /**< Static template, when not built by stores */
+	ea_t cmt_ea = BADADDR; /**< Where the comment goes */
+	const desc_t* desc =
+		nullptr; /**< Descriptor the instance stores, if known */
+	std::map<qstring, ea_t> fns; /**< Member -> callback */
 };
 
+/**
+ * @brief The descriptor at @p ea, or null
+ */
 static const desc_t* desc_at(const std::vector<desc_t>& descs, ea_t ea) {
 	for (const desc_t& d : descs) {
 		if (d.ea == ea) return &d;
@@ -47,11 +66,23 @@ static const desc_t* desc_at(const std::vector<desc_t>& descs, ea_t ea) {
 	return nullptr;
 }
 
+/**
+ * @brief Whether @p ea is code in this binary (not an import)
+ */
 static bool is_callback(ea_t ea) {
 	return is_code_addr(ea) && !in_extern_seg(ea);
 }
 
-// The instance at var + base, from the pointers stored into its members
+/**
+ * @brief The instance at `var + base`, from the pointers stored into its
+ * members
+ *
+ * @param pt     The `clap_plugin_t` type
+ * @param stores Stores collected from the function
+ * @param var    lvar holding the object
+ * @param base   Offset of the instance in @p var
+ * @param descs  Known descriptors, matched against the `desc` store
+ */
 static plugin_hit_t from_stores(const plugin_type_t& pt,
 	const std::vector<store_t>& stores, int var, int64 base,
 	const std::vector<desc_t>& descs) {
@@ -83,7 +114,13 @@ static plugin_hit_t from_stores(const plugin_type_t& pt,
 	return h;
 }
 
-// False when an instance with the same callbacks was already found
+/**
+ * @brief Adds @p h to @p out unless an instance with the same callbacks is
+ * there
+ *
+ * @return false when it was already found; its descriptor is filled in if
+ * missing
+ */
 static bool add_hit(std::vector<plugin_hit_t>& out, plugin_hit_t&& h) {
 	auto it = std::find_if(out.begin(), out.end(),
 		[&](const plugin_hit_t& o) { return o.fns == h.fns; });
@@ -97,7 +134,10 @@ static bool add_hit(std::vector<plugin_hit_t>& out, plugin_hit_t&& h) {
 	return false;
 }
 
-// What each clap_plugin_t member was set to, as VST2 does for AEffect
+/**
+ * @brief Logs what each `clap_plugin_t` member was set to, as VST2 does for
+ * `AEffect`
+ */
 static void dump_stores(const plugin_type_t& pt, cfunc_t* cf,
 	const std::vector<store_t>& stores, int var, int64 base) {
 
@@ -115,11 +155,18 @@ static void dump_stores(const plugin_type_t& pt, cfunc_t* cf,
 	resolve_fields(pt.layout.fields, o, stores, inf_is_64bit(), "this");
 }
 
-/*
-	Instances built in cf: at a store of a known descriptor, and with shape
-	set, at the base where the most callbacks land (a base one slot off
-	still matches all but one)
-*/
+/**
+ * @brief Finds the instances built in @p cf
+ *
+ * At a store of a known descriptor, and with @p shape set, at the base where
+ * the most callbacks land (a base one slot off still matches all but one).
+ *
+ * @param cf    Decompiled function
+ * @param pt    The `clap_plugin_t` type
+ * @param descs Known descriptors
+ * @param shape Also look for instances by the shape of their callback stores
+ * @param out   Instances found are appended
+ */
 static void scan_func(cfunc_t* cf, const plugin_type_t& pt,
 	const std::vector<desc_t>& descs, bool shape,
 	std::vector<plugin_hit_t>& out) {
@@ -173,7 +220,9 @@ static void scan_func(cfunc_t* cf, const plugin_type_t& pt,
 	}
 }
 
-// A static clap_plugin_t the function references
+/**
+ * @brief Finds the static `clap_plugin_t` templates that @p pfn references
+ */
 static void static_templates(
 	func_t* pfn, const plugin_type_t& pt, std::vector<plugin_hit_t>& out) {
 	rv_fii_t fii;
@@ -207,7 +256,10 @@ static void static_templates(
 	}
 }
 
-// create_plugin and the functions it calls directly
+/**
+ * @brief Scans `create_plugin` (@p root) and the functions it calls directly,
+ * up to #MAX_DEPTH and #MAX_FUNCS
+ */
 static void walk_calls(ea_t root, const plugin_type_t& pt,
 	const std::vector<desc_t>& descs, std::vector<plugin_hit_t>& out) {
 
@@ -240,6 +292,10 @@ static void walk_calls(ea_t root, const plugin_type_t& pt,
 	}
 }
 
+/**
+ * @brief Labels the extension structs that `get_extension` (@p ge) returns, by
+ * the ids it compares
+ */
 static void label_extensions(ea_t ge) {
 
 	struct ext_hit_t {
@@ -315,6 +371,11 @@ static void label_extensions(ea_t ge) {
 	mark_cfunc_dirty(ge);
 }
 
+/**
+ * @brief Names and types the callbacks of the instance @p h
+ *
+ * @param prefix Name prefix of the plugin
+ */
 static void label_hit(
 	const plugin_hit_t& h, const plugin_type_t& pt, const char* prefix) {
 

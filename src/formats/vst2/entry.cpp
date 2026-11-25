@@ -1,3 +1,7 @@
+/**
+ * @file entry.cpp
+ * @brief VST2 entry point detection and labeling.
+ */
 #include "core/log.hpp"
 #include "decomp/ctree.hpp"
 #include "vst2.hpp"
@@ -16,6 +20,10 @@
 
 namespace rv::vst2 {
 
+/**
+ * @brief Finds the `audioMaster(effect, audioMasterVersion, ...)` call that
+ * VST2 entry points start with: a call of the first argument with `1` as opcode
+ */
 struct vst_entry_finder_t : public ctree_visitor_t {
 
 	bool found = false;
@@ -37,9 +45,15 @@ struct vst_entry_finder_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Prototype applied to the entry point
+ */
 static const char* entry_decl =
 	"AEffect *__cdecl vst2_entry(audioMasterCallback audioMaster);";
 
+/**
+ * @brief Entry point typed by check_vst2_ep(), so label_entry() skips it
+ */
 static ea_t probed_ea = BADADDR;
 
 bool check_vst2_ep(ea_t ea) {

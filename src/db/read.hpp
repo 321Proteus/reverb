@@ -1,16 +1,24 @@
 #pragma once
+/**
+ * @file read.hpp
+ * @brief Small database readers: pointers, strings, four-character codes.
+ */
 #include <pro.h>
 #include <bytes.hpp>
 #include <ida.hpp>
 
+/** @brief Pointer size of the database, 4 or 8 */
 inline int ptr_size() { return inf_is_64bit() ? 8 : 4; }
 
-// Pointer-sized db load
+/** @brief Pointer-sized database load */
 inline ea_t read_ptr(ea_t ea) {
 	return ptr_size() == 8 ? ea_t(get_qword(ea)) : ea_t(get_dword(ea));
 }
 
-// Printable ASCII or UTF-8, no control characters
+/**
+ * @brief Whether @p s is non-empty printable ASCII or UTF-8 without control
+ * characters
+ */
 inline bool is_text(const qstring& s) {
 	const size_t len = s.length();
 
@@ -42,6 +50,12 @@ inline bool is_text(const qstring& s) {
 	return len != 0;
 }
 
+/**
+ * @brief Reads a C string at @p ea through IDA's string reader
+ *
+ * @param max_len Longest string accepted when @p ea is not yet a string item
+ * @return false unless the result is non-empty text, @sa is_text()
+ */
 inline bool read_cstr(ea_t ea, qstring& out, size_t max_len = 256) {
 	if (!is_strlit(get_flags(ea))) {
 		size_t n = get_max_strlit_length(ea, STRTYPE_C, ALOPT_IGNHEADS);
@@ -51,8 +65,12 @@ inline bool read_cstr(ea_t ea, qstring& out, size_t max_len = 256) {
 	return is_text(out);
 }
 
-// Read a raw NUL-terminated UTF-8 string without IDA's string reader (which
-// gets some emoji wrong). An empty string is valid.
+/**
+ * @brief Reads a raw NUL-terminated UTF-8 string without IDA's string reader
+ * (which gets some emoji wrong)
+ *
+ * An empty string is valid.
+ */
 inline bool read_utf8(ea_t ea, qstring& out, size_t max_len = 1024) {
 	out.clear();
 	for (size_t i = 0; i < max_len; i++) {
@@ -65,6 +83,11 @@ inline bool read_utf8(ea_t ea, qstring& out, size_t max_len = 1024) {
 	return false;
 }
 
+/**
+ * @brief Formats a four-character code, e.g. `'VST3' (0x56535433)`
+ *
+ * Non-printable bytes are shown as `.`.
+ */
 inline qstring fourcc(uint32 v) {
 	char c[5] = { char(v >> 24), char(v >> 16), char(v >> 8), char(v), 0 };
 	for (int i = 0; i < 4; i++)

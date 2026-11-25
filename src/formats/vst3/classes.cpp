@@ -1,3 +1,8 @@
+/**
+ * @file classes.cpp
+ * @brief Labeling of VST3 classes: `registerClass` matching, create functions,
+ * vtables.
+ */
 #include "factory.hpp"
 #include "core/log.hpp"
 #include "cxx/vtable.hpp"
@@ -22,29 +27,41 @@ namespace rv::vst3 {
 
 namespace {
 
+/**
+ * @brief An interface id: its name and the four longs of its `INLINE_UID`
+ */
 struct iid_t {
 	const char* name;
 	uint32 l[4];
 };
 
+/**
+ * @brief The interface ids that queryInterface is matched against, from
+ * `iids.inc`
+ */
 constexpr iid_t KNOWN_IIDS[] = {
 #define RV_IID(n, l1, l2, l3, l4) { #n, { l1, l2, l3, l4 } },
 #include "iids.inc"
 #undef RV_IID
 };
 
-// A PClassInfo2 and the registerClass call that passes it
+/**
+ * @brief A `PClassInfo2` and the `registerClass` call that passes it
+ */
 struct class_rec_t {
 	const factory_struct_t* s = nullptr;
 	qstring name, category, cid;
 	bool have_flags = false;
 	uint64 flags = 0;
 
-	ea_t call_ea = BADADDR;
-	ea_t callee = BADADDR;
-	ea_t create = BADADDR;
+	ea_t call_ea = BADADDR; /**< The `registerClass` call */
+	ea_t callee = BADADDR;	/**< `registerClass` itself */
+	ea_t create = BADADDR;	/**< The create function */
 };
 
+/**
+ * @brief The class id of @p s as 32 hex digits, empty if it is not constant
+ */
 qstring cid_hex(const factory_struct_t& s) {
 	qstring out;
 	auto it = s.fields.find("cid");
@@ -63,6 +80,10 @@ qstring cid_hex(const factory_struct_t& s) {
 	return out;
 }
 
+/**
+ * @brief @p s as an identifier: other characters become single `_`, trimmed at
+ * the ends
+ */
 qstring sanitize(const qstring& s) {
 	qstring out;
 
@@ -80,7 +101,15 @@ qstring sanitize(const qstring& s) {
 	return out;
 }
 
-// The call that passes s and a code address is the create function
+/**
+ * @brief Finds the `registerClass` call that passes @p s: the call that passes
+ * @p s and a code address, which is the create function
+ *
+ * @param calls Calls of the factory function
+ * @param s     The `PClassInfo2`
+ * @param r     Receives `callee` and `create`
+ * @return false if no call matches
+ */
 bool find_register_call(const std::vector<call_t>& calls,
 	const factory_struct_t& s, class_rec_t& r) {
 
@@ -123,7 +152,10 @@ bool find_register_call(const std::vector<call_t>& calls,
 	return false;
 }
 
-// Appends text unless the function comment already holds it
+/**
+ * @brief Appends @p text to the function comment of @p ea unless it already
+ * holds it
+ */
 void add_func_cmt(ea_t ea, const qstring& text) {
 	qstring cur;
 	func_t* func = get_func(ea);
@@ -136,12 +168,18 @@ void add_func_cmt(ea_t ea, const qstring& text) {
 	set_func_cmt(func, cur.c_str(), false);
 }
 
+/**
+ * @brief Appends @p text to the comment at @p ea unless it already holds it
+ */
 void add_cmt(ea_t ea, const qstring& text) {
 	qstring cur;
 	get_cmt(&cur, ea, false);
 	if (cur.find(text) == qstring::npos) append_cmt(ea, text.c_str(), false);
 }
 
+/**
+ * @brief Names the function @p ea @p nm, keeping a name a user gave it
+ */
 void name_func(ea_t ea, const qstring& nm) {
 	if (has_user_name(get_flags(ea))) {
 		qstring cur;
@@ -152,6 +190,10 @@ void name_func(ea_t ea, const qstring& nm) {
 	}
 }
 
+/**
+ * @brief Names the create function of @p r @p fname and refreshes its
+ * decompilation
+ */
 void apply_class(const class_rec_t& r, const qstring& fname) {
 	name_func(r.create, fname);
 
@@ -192,10 +234,12 @@ void apply_class(const class_rec_t& r, const qstring& fname) {
 	mark_cfunc_dirty(r.create);
 }
 
-/*
-	REverb's own default prototype, FUnknown *f(void *context) as apply_class
-	wrote it
-*/
+/**
+ * @brief REverb's own default prototype for a create function,
+ * `FUnknown *f(void *context)`, as apply_class() wrote it
+ *
+ * @return Whether the function at @p ea still has exactly that prototype
+ */
 bool default_create_proto(ea_t ea) {
 	const qstring unk = resolve_type(VST3_SCOPE, "FUnknown");
 	if (unk.empty()) return false;
@@ -210,13 +254,16 @@ bool default_create_proto(ea_t ea) {
 		   fi.rettype.get_pointed_object().get_type_name(&n) && n == unk;
 }
 
-/*
-	What a host does with a createInstance result, queries it from FUnknown,
-	or uses it as the component or controller it asked for
-*/
+/**
+ * @brief What a host does with a `createInstance` result: queries it from
+ * `FUnknown`, or uses it as the component or controller it asked for
+ */
 constexpr const char* HOST_IFACES[] = { "IPluginBase", "IComponent",
 	"IAudioProcessor", "IEditController", "IEditController2" };
 
+/**
+ * @brief Whether @p name (short or qualified) is one of #HOST_IFACES
+ */
 bool host_iface(const qstring& name) {
 	const size_t sep = name.rfind(':');
 	const char* base = name.c_str() + (sep == qstring::npos ? 0 : sep + 1);
@@ -225,13 +272,18 @@ bool host_iface(const qstring& name) {
 	return false;
 }
 
-/*
-	createInstance returns the object cast to an interface, a subobject:
-	return (IAudioProcessor *)obj; is obj + 0xC0 with multiple inheritance.
-	Types the return as the interface pinned at that offset, and with a
-	nonzero offset the object local as char *, so the adjustment reads in
-	bytes instead of scaled by the interface size
-*/
+/**
+ * @brief Types the return of the create function of @p r as the interface
+ * pinned at the returned offset
+ *
+ * `createInstance` returns the object cast to an interface, a subobject:
+ * `return (IAudioProcessor *)obj;` is `obj + 0xC0` with multiple inheritance.
+ * With a nonzero offset the object local is typed `char *` too, so the
+ * adjustment reads in bytes instead of scaled by the interface size.
+ *
+ * @param r      The class
+ * @param ifaces Subobject offset -> interface pinned there
+ */
 void type_return(
 	const class_rec_t& r, const std::map<sval_t, qstring>& ifaces) {
 	cfuncptr_t cf = decompile_at(r.create, DECOMP_NO_WAIT | DECOMP_NO_CACHE);
@@ -280,6 +332,12 @@ void type_return(
 	type_return_base(r.create, label.c_str());
 }
 
+/**
+ * @brief Whether the `<iface>_vtbl` type of @p iface fits in the vtable at @p
+ * vt
+ *
+ * @param size Receives the size of the type in bytes, may be null
+ */
 bool vtbl_fits(const qstring& iface, ea_t vt, size_t* size = nullptr) {
 	const qstring vtbl = resolve_type(VST3_SCOPE, (iface + "_vtbl").c_str());
 	tinfo_t t;
@@ -297,7 +355,10 @@ bool vtbl_fits(const qstring& iface, ea_t vt, size_t* size = nullptr) {
 	return true;
 }
 
-// Largest fitting vtable type among names
+/**
+ * @brief The largest of the vtable types of @p names that fits the vtable at @p
+ * vt, or empty
+ */
 qstring largest_fit(const std::vector<qstring>& names, ea_t vt) {
 	qstring best;
 	size_t best_size = 0;
@@ -313,10 +374,14 @@ qstring largest_fit(const std::vector<qstring>& names, ea_t vt) {
 	return best;
 }
 
-/*
-	The interface to pick for an RTTI vtable is the one with largest fitting
-	base; why explains an empty result
-*/
+/**
+ * @brief The interface to pick for an RTTI vtable: the one with the largest
+ * fitting base
+ *
+ * @param vt  Vtable address point
+ * @param ci  RTTI of the vtable
+ * @param why Explains an empty result
+ */
 qstring rtti_iface(ea_t vt, const rtti::class_info& ci, qstring& why) {
 	std::vector<qstring> names;
 	const qvector<qstring> bases = rtti::bases_at(ci, ci.sub_offset);
@@ -340,7 +405,9 @@ qstring rtti_iface(ea_t vt, const rtti::class_info& ci, qstring& why) {
 	return best;
 }
 
-// Constants of an if condition
+/**
+ * @brief Collects the constants, objects and IID use of an `if` condition
+ */
 struct cond_consts_t : public ctree_visitor_t {
 	const std::set<int>& iid_vars;
 	std::set<uint64> q;
@@ -372,7 +439,10 @@ struct cond_consts_t : public ctree_visitor_t {
 	}
 };
 
-// *obj = this + k
+/**
+ * @brief Finds the store `*obj = this + k`, giving the offset @c k of the
+ * subobject
+ */
 struct obj_store_finder_t : public ctree_visitor_t {
 	const std::set<int>& self_vars;
 	const std::set<int>& obj_vars;
@@ -398,10 +468,14 @@ struct obj_store_finder_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Reads `queryInterface`: which IID comparisons lead to storing `this +
+ * k` into the out parameter
+ */
 struct qi_reader_t : public ctree_visitor_t {
 	std::set<int> self_vars, iid_vars, obj_vars;
 	std::vector<std::pair<const iid_t*, std::array<uchar, 16>>> iids;
-	bool numeric = true; // little-endian: match qword/dword constants
+	bool numeric = true; /**< Little-endian: match qword/dword constants */
 	std::map<qstring, sval_t> found;
 
 	qi_reader_t() : ctree_visitor_t(CV_FAST) {}
@@ -454,6 +528,9 @@ struct qi_reader_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Follows copies of the `this`, IID and out-parameter locals
+ */
 struct copy_finder_t : public ctree_visitor_t {
 	std::set<int>* sets[3];
 	copy_finder_t(std::set<int>* a, std::set<int>* b, std::set<int>* c)
@@ -466,7 +543,9 @@ struct copy_finder_t : public ctree_visitor_t {
 	}
 };
 
-// IID name -> this offset, from queryInterface in slot 0 of vt0
+/**
+ * @brief IID name -> `this` offset, from `queryInterface` in slot 0 of @p vt0
+ */
 std::map<qstring, sval_t> read_query_interface(ea_t vt0) {
 	const ea_t qi = vtbl::slot_func(vt0, 0);
 	if (qi == BADADDR) {
@@ -511,7 +590,7 @@ std::map<qstring, sval_t> read_query_interface(ea_t vt0) {
 	return r.found;
 }
 
-// The interface of an X_vtbl typed vtable
+/** @brief The interface of an `X_vtbl` typed vtable, or empty */
 qstring vtbl_iface(ea_t vt) {
 	tinfo_t cur;
 	qstring n;
@@ -521,8 +600,18 @@ qstring vtbl_iface(ea_t vt) {
 	return n;
 }
 
+/** @brief Whether the vtable at @p vt has a user type or a `_vtbl` type already
+ */
 bool already_typed(ea_t vt) { return is_userti(vt) || !vtbl_iface(vt).empty(); }
 
+/**
+ * @brief Finds the vtables stored by the create function of @p r and pins their
+ * interface types
+ *
+ * The interface comes from RTTI, or without it from the IIDs `queryInterface`
+ * compares. Stores are read from the function itself or from the constructor it
+ * calls.
+ */
 void type_object(const class_rec_t& r) {
 
 	// Subobject offset -> vtable, from an inlined or a leaf constructor
@@ -618,6 +707,12 @@ void type_object(const class_rec_t& r) {
 	type_return(r, ifaces);
 }
 
+/**
+ * @brief Adds the class @p r to the report
+ *
+ * @param missing Shown as the `createInstance` row when no create function was
+ * found, null otherwise
+ */
 void report_class(const class_rec_t& r, const char* missing) {
 
 	qstring title;

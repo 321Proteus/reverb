@@ -1,3 +1,7 @@
+/**
+ * @file refs.cpp
+ * @brief ref_index construction and lookup.
+ */
 #include "refs.hpp"
 #include "segments.hpp"
 #include "read.hpp"
@@ -51,6 +55,7 @@ void ref_index::build() {
 	}
 }
 
+/** @brief Locations stored for target @p t in @p m, or null */
 static const std::vector<ea_t>* lookup(const ref_index::map_t& m, ea_t t) {
 	auto it = m.find(t);
 	return it == m.end() ? nullptr : &it->second;

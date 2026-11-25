@@ -13,55 +13,75 @@
 #include <utility>
 #include <vector>
 
-/*
-	Selector dispatch: an entry point that takes a selector (VST2 opcode, AU
-	selector, ...) and reaches per-selector code through a switch, an if-chain
-	and any number of forwarding calls, direct or virtual. Format modules only
-	supply argument positions and decide what to do with each case.
-*/
+/**
+ * @file dispatch.hpp
+ * @brief Selector dispatch: an entry point that takes a selector (VST2 opcode,
+ * AU selector, ...) and reaches per-selector code through a switch, an if-chain
+ * and any number of forwarding calls, direct or virtual. Format modules only
+ * supply argument positions and decide what to do with each case.
+ */
 namespace rv {
 
+/**
+ * @brief Argument positions of a dispatching function, -1 for absent ones
+ */
 struct dispatch_args_t {
-	int sel = -1;
-	int ptr = -1;
-	int obj = -1;
-	int obj_src = -1; // object = *(arg obj_src + obj_off)
-	int64 obj_off = -1;
-	ea_t vtable = BADADDR; // most derived vtable of the object (if known)
+	int sel = -1;		   /**< Selector */
+	int ptr = -1;		   /**< Data pointer */
+	int obj = -1;		   /**< The object itself (`this`) */
+	int obj_src = -1;	   /**< Object = `*(arg obj_src + obj_off)` */
+	int64 obj_off = -1;	   /**< See #obj_src */
+	ea_t vtable = BADADDR; /**< Most derived vtable of the object (if known) */
 
-	// Arguments the function must have to be walked
+	/** @brief Arguments the function must have to be walked */
 	int min_args() const { return 1 + std::max({ sel, ptr, obj, obj_src }); }
 };
 
+/**
+ * @brief Where a dispatch walk starts and how far it goes
+ */
 struct dispatch_cfg_t {
-	dispatch_args_t root;
-	uint64 max_sel = 0xFFFF;
-	int max_depth = 4;
+	dispatch_args_t root;	 /**< Arguments of the entry function */
+	uint64 max_sel = 0xFFFF; /**< Larger selectors are ignored */
+	int max_depth = 4;		 /**< Forwarding calls followed */
 };
 
-/*
-	One selector case. Points into the decompiled function, so it is only
-	valid during the callback.
-*/
+/**
+ * @brief One selector case
+ *
+ * Points into the decompiled function, so it is only valid during the
+ * callback.
+ */
 struct dispatch_case_t {
-	uint64 sel;
-	cinsn_t* body;
-	cfunc_t* cf;
-	int depth;
-	const obj_tracker_t& obj;
-	const std::set<int>& ptrvars;
+	uint64 sel;					  /**< Selector value */
+	cinsn_t* body;				  /**< Code of the case */
+	cfunc_t* cf;				  /**< Function containing it */
+	int depth;					  /**< Forwarding calls followed to get here */
+	const obj_tracker_t& obj;	  /**< The object, tracked through @c cf */
+	const std::set<int>& ptrvars; /**< Locals holding the data pointer */
 };
 
+/**
+ * @brief What a dispatch walk visited
+ */
 struct dispatch_result_t {
-	ea_t switch_func = BADADDR; // first function with a real selector switch
-	std::vector<ea_t> chain;	// visited functions, outermost first
+	ea_t switch_func =
+		BADADDR;			 /**< First function with a real selector switch */
+	std::vector<ea_t> chain; /**< Visited functions, outermost first */
 };
 
+/** @brief Callback receiving each case found */
 typedef std::function<void(const dispatch_case_t&)> dispatch_cb_t;
 
+/** @cond INTERNAL */
 namespace detail {
 
-// Is e the selector, possibly biased?
+/**
+ * @brief Whether @p e is the selector (one of @p vars), possibly biased
+ *
+ * @param bias Receives the value to add to a compared constant to get the
+ * selector
+ */
 inline bool is_sel_expr(cexpr_t* e, const std::set<int>& vars, int64& bias) {
 	e = strip_casts(e);
 	bias = 0;
@@ -75,11 +95,19 @@ inline bool is_sel_expr(cexpr_t* e, const std::set<int>& vars, int64& bias) {
 	return e->op == cot_var && vars.count(e->v.idx) != 0;
 }
 
-/*
-	Selector values for which a condition holds: sel == N and || chains of
-	them. With negated set, the values make it false instead (sel != N and
-	&& chains of them), so they take the else branch.
-*/
+/**
+ * @brief Selector values for which a condition holds: `sel == N` and `||`
+ * chains of them
+ *
+ * With @p negated set, the values make it false instead (`sel != N` and `&&`
+ * chains of them), so they take the else branch.
+ *
+ * @param c       Condition
+ * @param vars    Locals holding the selector
+ * @param vals    Receives the selector values
+ * @param negated Receives whether the values make the condition false
+ * @return false if the condition is not about the selector
+ */
 inline bool sel_cond(cexpr_t* c, const std::set<int>& vars,
 	std::vector<uint64>& vals, bool& negated) {
 	c = strip_casts(c);
@@ -107,25 +135,32 @@ inline bool sel_cond(cexpr_t* c, const std::set<int>& vars,
 	return true;
 }
 
+/**
+ * @brief Finds the case bodies of one function and the calls that forward the
+ * selector
+ */
 struct sel_walker_t : public ctree_visitor_t {
-	std::set<int> selvars; // selector arg + copies
-	std::set<int> ptrvars; // data pointer arg + copies
+	std::set<int> selvars; /**< Selector arg + copies */
+	std::set<int> ptrvars; /**< Data pointer arg + copies */
 	obj_tracker_t obj;
 	uint64 max_sel = 0;
 
 	bool found_switch = false;
-	std::map<uint64, cinsn_t*> bodies; // selector -> case body
+	std::map<uint64, cinsn_t*> bodies; /**< Selector -> case body */
 
+	/** @brief A call that forwards the selector */
 	struct fwd_t {
-		ea_t callee; // resolved target or BADADDR if unknown
-		int slot;	 // vtable slot of a virtual call, -1 for direct
-		dispatch_args_t args;
-		tinfo_t site; // prototype at the call site
+		ea_t callee; /**< Resolved target or BADADDR if unknown */
+		int slot;	 /**< Vtable slot of a virtual call, -1 for direct */
+		dispatch_args_t args; /**< Where the arguments land in the callee */
+		tinfo_t site;		  /**< Prototype at the call site */
 	};
 	std::vector<fwd_t> fwds;
 
 	sel_walker_t() : ctree_visitor_t(CV_FAST) {}
 
+	/** @brief Records @p body for @p sel; the first one wins, larger selectors
+	 * are ignored */
 	void add_body(uint64 sel, cinsn_t* body) {
 		if (sel <= max_sel && body != nullptr)
 			bodies.emplace(sel, body); // first one wins
@@ -192,6 +227,18 @@ struct sel_walker_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Walks the function at @p ea, then the calls that forward the selector
+ *
+ * @param ea      Function
+ * @param args    Argument positions in @p ea
+ * @param site    Prototype at the call site, used to fix up the arguments
+ * @param depth   Forwarding calls followed so far
+ * @param cfg     Walk configuration
+ * @param seen    Functions already walked
+ * @param res     Receives what was visited
+ * @param on_case Receives each case
+ */
 inline void walk(ea_t ea, const dispatch_args_t& args, const tinfo_t* site,
 	int depth, const dispatch_cfg_t& cfg, std::set<ea_t>& seen,
 	dispatch_result_t& res, const dispatch_cb_t& on_case) {
@@ -240,7 +287,19 @@ inline void walk(ea_t ea, const dispatch_args_t& args, const tinfo_t* site,
 }
 
 } // namespace detail
+/** @endcond */
 
+/**
+ * @brief Walks a selector dispatcher and hands each case to @p on_case
+ *
+ * Follows switches, if-chains and forwarding calls, direct or virtual, up to
+ * `cfg.max_depth`.
+ *
+ * @param ea      Entry function
+ * @param cfg     Argument positions and limits
+ * @param on_case Called for each case; the case is only valid during the call
+ * @return The visited functions and the first one with a real switch
+ */
 inline dispatch_result_t walk_dispatch(
 	ea_t ea, const dispatch_cfg_t& cfg, const dispatch_cb_t& on_case) {
 	dispatch_result_t res;

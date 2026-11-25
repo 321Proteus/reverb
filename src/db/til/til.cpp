@@ -1,3 +1,7 @@
+/**
+ * @file til.cpp
+ * @brief Locating, loading and importing the bundled type libraries.
+ */
 #include "til.hpp"
 #include "core/log.hpp"
 #include "db/til/pick.hpp"
@@ -13,12 +17,15 @@
 
 namespace rv::til {
 
-// The ABI the type libraries are built for, nullptr if there are none
+/** @brief The ABI the type libraries are built for, nullptr if there are none
+ */
 static const char* get_til_abi() {
 	if (inf_get_filetype() != f_PE) return nullptr;
 	return inf_is_64bit() ? "msvc64" : "msvc32";
 }
 
+/** @brief Collects the til files matching a request while IDA walks a directory
+ */
 struct scanner_t : file_enumerator_t {
 	std::string name;
 	std::string abi;
@@ -39,10 +46,11 @@ struct scanner_t : file_enumerator_t {
 	}
 };
 
-/*
-	The tils are looked up where IDA itself looks for them ($IDAUSR/til/<proc>,
-	then $IDADIR/til/<proc>); that search is not recursive
-*/
+/**
+ * @brief Looks for the tils where IDA itself looks for them
+ * (`$IDAUSR/til/<proc>`, then `$IDADIR/til/<proc>`); the search is not
+ * recursive
+ */
 static std::vector<TilEntry> search_tils(
 	const Request& req, const char* abi, qstring* searched) {
 	qstrvec_t dirs;
@@ -97,6 +105,10 @@ size_t group_local_types(uint32 first, uint32 last, const char* folder) {
 	return moved;
 }
 
+/**
+ * @brief Copies every named type of @p src into the local types and groups them
+ * in @p folder
+ */
 static void import_types(til_t* src, const char* label, const char* folder) {
 	til_t* local = get_idati();
 

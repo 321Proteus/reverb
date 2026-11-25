@@ -1,8 +1,13 @@
+/**
+ * @file report.cpp
+ * @brief Report storage.
+ */
 #include "report.hpp"
 #include <name.hpp>
 
 namespace rv::report {
 
+/** @brief The entries of the current report */
 static std::vector<report_entry_t> g_entries;
 
 void clear() { g_entries.clear(); }

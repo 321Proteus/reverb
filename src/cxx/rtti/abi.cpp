@@ -4,7 +4,10 @@
 #include <algorithm>
 #include <pro.h>
 
-// ABI-neutral helpers and the dispatch between itanium.cpp and msvc.cpp
+/**
+ * @file abi.cpp
+ * @brief ABI-neutral helpers and dispatch between itanium.cpp and msvc.cpp.
+ */
 namespace rv::rtti {
 
 qstring short_name(const qstring& name) {
@@ -23,8 +26,6 @@ qstring short_name(const qstring& name) {
 	}
 	return name.substr(start);
 }
-
-// ---- Forward: vtable -> class ----
 
 bool parse_rtti(ea_t vt, class_info* out) {
 	if (vt == BADADDR || !is_loaded(vt - 2 * ptr_size())) return false;
@@ -50,9 +51,9 @@ qstring class_name(ea_t vt) {
 	return parse_rtti(vt, &ci) ? ci.name : qstring();
 }
 
-// ---- Reverse: name / typeinfo -> class, vtables ----
-
-// Start of the NUL-terminated string containing ea
+/**
+ * @brief Start of the NUL-terminated string containing @p ea, or BADADDR
+ */
 static ea_t string_start(ea_t ea) {
 	for (size_t i = 0; i < MAX_NAME; i++, ea--)
 		if (!is_loaded(ea - 1) || get_byte(ea - 1) == 0) return ea;
@@ -73,8 +74,10 @@ bool parse_typeinfo(const ref_index& refs, ea_t ti, class_info* out) {
 								 : itanium::parse_typeinfo(refs, ti, out);
 }
 
-// Plausible first slot of a vtable: code, or an import (pure virtual stubs
-// and external overrides land in the extern segment)
+/**
+ * @brief Plausible first vtable slot: code, or an import (pure virtual stubs
+ * and external overrides land in the extern segment)
+ */
 static bool slot_like(ea_t target) {
 	if (target == 0 || target == BADADDR) return false;
 	const segment_t* s = getseg(target);

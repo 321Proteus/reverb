@@ -8,17 +8,20 @@
 #include <pro.h>
 #include <typeinf.hpp>
 
-/*
-	Finds a type by its unqualified name, whichever way it got into the
-	database:
-	  - from a til parsed by clang    Steinberg::PFactoryInfo
-	  - from the flat decl fallback   PFactoryInfo
-	A format searches only its own namespaces (a TypeScope), so a VST3 lookup
-	can never land on a juce:: type that happens to share the short name.
-*/
+/**
+ * @file type_name.hpp
+ * @brief Finds a type by its unqualified name, whichever way it got into the
+ * database.
+ *
+ * - from a til parsed by clang: `Steinberg::PFactoryInfo`
+ * - from the flat decl fallback: `PFactoryInfo`
+ *
+ * A format searches only its own namespaces (a TypeScope), so a VST3 lookup
+ * can never land on a `juce::` type that happens to share the short name.
+ */
 namespace rv {
 
-// A constexpr view of a static array of prefixes
+/** @brief A constexpr view of a static array of prefixes */
 struct PrefixList {
 	const char* const* first;
 	size_t count;
@@ -30,22 +33,27 @@ struct PrefixList {
 	constexpr const char* operator[](size_t i) const { return first[i]; }
 };
 
+/** @brief Wraps a static array of prefixes in a PrefixList */
 template <size_t N>
 constexpr PrefixList make_prefixes(const char* const (&a)[N]) {
 	return { a, N };
 }
 
+/**
+ * @brief The namespaces one format may look types up in
+ */
 struct TypeScope {
-	const char* id; // cache key
-	// Tried in order, "" is the flat name. The first one is also what
-	// resolve_type_or_default() falls back to
-	PrefixList prefixes;
+	const char* id; /**< Cache key */
+	PrefixList
+		prefixes; /**< Tried in order, `""` is the flat name; the first is also
+					 what resolve_type_or_default() falls back to */
 };
 
 inline constexpr const char* VST3_PREFIXES[] = {
 	"Steinberg::", "Steinberg::Vst::", ""
 };
 
+/** @brief Scope of the VST3 types */
 inline constexpr TypeScope VST3_SCOPE{ "vst3", make_prefixes(VST3_PREFIXES) };
 
 namespace detail {
@@ -65,7 +73,7 @@ inline bool type_exists(const char* name) {
 	return t.get_named_type(nullptr, name);
 }
 
-// "Steinberg::" for "Steinberg::Vst::"; empty for ""
+/** @brief `"Steinberg::"` for `"Steinberg::Vst::"`; empty for `""` */
 inline std::string root_of(const char* prefix) {
 	const char* sep = std::strstr(prefix, "::");
 	return sep ? std::string(prefix, size_t(sep - prefix) + 2) : std::string();
@@ -73,15 +81,23 @@ inline std::string root_of(const char* prefix) {
 
 } // namespace detail
 
-// Call when types may have been added or the database changed (til loaded,
-// decls parsed, database closed). Only hits are cached, so a type that
-// appears later is still found; this only drops answers that went stale
+/**
+ * @brief Drops cached lookups
+ *
+ * Call when types may have been added or the database changed (til loaded,
+ * decls parsed, database closed). Only hits are cached, so a type that appears
+ * later is still found; this only drops answers that went stale.
+ */
 inline void reset_type_cache() {
 	detail::type_cache().clear();
 	detail::ambiguous_logged().clear();
 }
 
-// Full name of the type, empty if there is none or it is ambiguous
+/**
+ * @brief Full name of the type @p base within @p sc
+ *
+ * @return The name, empty if there is none or it is ambiguous
+ */
 inline qstring resolve_type(const TypeScope& sc, const char* base) {
 	const std::string key = std::string(sc.id) + '|' + base;
 
@@ -148,8 +164,10 @@ inline qstring resolve_type(const TypeScope& sc, const char* base) {
 	return found;
 }
 
-// resolve_type, or <first prefix><base> when nothing is found so that a
-// failed lookup still logs a qualified name
+/**
+ * @brief resolve_type(), or `<first prefix><base>` when nothing is found so
+ * that a failed lookup still logs a qualified name
+ */
 inline qstring resolve_type_or_default(const TypeScope& sc, const char* base) {
 	qstring r = resolve_type(sc, base);
 	if (r.empty())
@@ -158,6 +176,7 @@ inline qstring resolve_type_or_default(const TypeScope& sc, const char* base) {
 	return r;
 }
 
+/** @brief resolve_type_or_default() in VST3_SCOPE */
 inline qstring vst3_type(const char* base) {
 	return resolve_type_or_default(VST3_SCOPE, base);
 }

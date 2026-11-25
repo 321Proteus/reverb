@@ -1,10 +1,15 @@
+/**
+ * @file sse.cpp
+ * @brief SSE intrinsic matchers, see sse.hpp.
+ */
 #include "sse.hpp"
 
-/*
-	Bytes written by a store intrinsic, or 0. The upper-half stores
-	(_mm_storeh_*) write at p, but not the low half of the value, so they are
-	not modelled
-*/
+/**
+ * @brief Bytes written by a store intrinsic named @p n, or 0
+ *
+ * The upper-half stores (`_mm_storeh_*`) write at p, but not the low half of
+ * the value, so they are not modelled.
+ */
 static int store_size(const char* n) {
 	for (const char* w : { "_mm_store_si128", "_mm_storeu_si128",
 			 "_mm_store_ps", "_mm_storeu_ps", "_mm_store_pd", "_mm_storeu_pd" })

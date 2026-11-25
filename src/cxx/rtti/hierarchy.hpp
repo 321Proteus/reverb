@@ -1,37 +1,62 @@
 #pragma once
 
+/**
+ * @file hierarchy.hpp
+ * @brief Database-wide class hierarchy built from RTTI
+ */
+
 #include "abi.hpp"
 #include <map>
 #include <vector>
 
 namespace rv::rtti {
 
+/**
+ * @brief A class in the type hierarchy
+ */
 struct class_node {
-	class_info info; // bases carry typeinfo addresses and direct flags
-	std::vector<ea_t> vtables; // address points, primary and secondary
+	class_info info; /**< Bases carry typeinfo addresses and direct flags */
+	std::vector<ea_t> vtables; /**< Address points, primary and secondary */
 	std::vector<ea_t>
-		derived; // typeinfos of classes directly derived from this one
+		derived; /**< Typeinfos of classes directly derived from this one */
 };
 
+/**
+ * @brief Index of all RTTI classes with lookups by typeinfo, name and vtable
+ */
 class class_hierarchy {
 public:
-	// One pass over the IDB. Run once afteer auto-analysis is done, so vtable
-	// slots point at analyzed code.
+	/**
+	 * @brief Scan the IDB once. Run after auto-analysis finishes so vtable
+	 * slots point at analyzed code
+	 */
 	void build();
 
+	/**
+	 * @brief Node of typeinfo @p ti, or null.
+	 */
 	const class_node* find(ea_t ti) const;
 
-	// Demangled name, first match if several
+	/**
+	 * @brief Node by demangled name (first match if several), or null.
+	 */
 	const class_node* find_class(const qstring& name) const;
 
-	// Classes deriving from ti, recursive also returns indirect ones
+	/**
+	 * @brief Classes deriving from @p ti; with @p recursive also indirect ones.
+	 */
 	std::vector<const class_node*> derived_of(
 		ea_t ti, bool recursive = false) const;
 
-	// Immediate bases of ti
+	/**
+	 * @brief Immediate bases of @p ti.
+	 */
 	std::vector<const base_info*> direct_bases(ea_t ti) const;
 
-	// Typeinfo of the class owning the vtable at vt (primary or secondary)
+	/**
+	 * @brief Typeinfo of the class owning the vtable at @p vt (primary or
+	 * secondary), or BADADDR
+	 */
 	ea_t class_of_vtable(ea_t vt) const;
 
 	const ref_index& refs() const { return refs_; }

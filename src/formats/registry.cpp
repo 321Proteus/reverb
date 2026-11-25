@@ -1,3 +1,7 @@
+/**
+ * @file registry.cpp
+ * @brief Table of the available format modules.
+ */
 #include "format.hpp"
 #include "formats/vst2/vst2.hpp"
 #include "vst2_types_embed.h"
