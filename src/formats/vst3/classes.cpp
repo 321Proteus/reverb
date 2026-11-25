@@ -11,6 +11,7 @@
 #include "db/segments.hpp"
 #include "decomp/analysis.hpp"
 #include "decomp/call.hpp"
+#include "decomp/returns.hpp"
 #include "ui/report.hpp"
 #include <array>
 #include <bytes.hpp>
@@ -234,25 +235,102 @@ void apply_class(const class_rec_t& r, const qstring& fname) {
 }
 
 /**
- * @brief Finds the locals returned by the function, through `this` with an
- * offset
+ * @brief REverb's own default prototype for a create function,
+ * `FUnknown *f(void *context)`, as apply_class() wrote it
+ *
+ * @return Whether the function at @p ea still has exactly that prototype
  */
-struct return_var_finder_t : public ctree_visitor_t {
-	std::set<int> vars;
+bool default_create_proto(ea_t ea) {
+	const qstring unk = resolve_type(VST3_SCOPE, "FUnknown");
+	if (unk.empty()) return false;
 
-	return_var_finder_t() : ctree_visitor_t(CV_FAST) {}
+	tinfo_t t;
+	func_type_data_t fi;
+	if (!get_tinfo(&t, ea) || !t.get_func_details(&fi) || fi.size() != 1)
+		return false;
 
-	int idaapi visit_insn(cinsn_t* i) override {
-		loc_t l;
+	qstring n;
+	return fi.rettype.is_ptr() &&
+		   fi.rettype.get_pointed_object().get_type_name(&n) && n == unk;
+}
 
-		if (i->op == cit_return && i->creturn != nullptr &&
-			fold_addr(&i->creturn->expr, nullptr, l)) {
-			vars.insert(l.var);
-		}
+/**
+ * @brief What a host does with a `createInstance` result: queries it from
+ * `FUnknown`, or uses it as the component or controller it asked for
+ */
+constexpr const char* HOST_IFACES[] = { "IPluginBase", "IComponent",
+	"IAudioProcessor", "IEditController", "IEditController2" };
 
-		return 0;
+/**
+ * @brief Whether @p name (short or qualified) is one of #HOST_IFACES
+ */
+bool host_iface(const qstring& name) {
+	const size_t sep = name.rfind(':');
+	const char* base = name.c_str() + (sep == qstring::npos ? 0 : sep + 1);
+	for (const char* h : HOST_IFACES)
+		if (streq(base, h)) return true;
+	return false;
+}
+
+/**
+ * @brief Types the return of the create function of @p r as the interface
+ * pinned at the returned offset
+ *
+ * `createInstance` returns the object cast to an interface, a subobject:
+ * `return (IAudioProcessor *)obj;` is `obj + 0xC0` with multiple inheritance.
+ * With a nonzero offset the object local is typed `char *` too, so the
+ * adjustment reads in bytes instead of scaled by the interface size.
+ *
+ * @param r      The class
+ * @param ifaces Subobject offset -> interface pinned there
+ */
+void type_return(
+	const class_rec_t& r, const std::map<sval_t, qstring>& ifaces) {
+	cfuncptr_t cf = decompile_at(r.create, DECOMP_NO_WAIT | DECOMP_NO_CACHE);
+	loc_t l;
+	if (cf == nullptr || !return_loc(cf, l)) {
+		rv_log("  object of \"%s\": returned pointer not followed",
+			r.name.c_str());
+		return;
 	}
-};
+
+	auto it = ifaces.find(sval_t(l.off));
+	if (it == ifaces.end()) {
+		rv_log(
+			"  object of \"%s\": returns this+0x%llX, no interface typed there",
+			r.name.c_str(), (uint64)l.off);
+		return;
+	}
+
+	if (!host_iface(it->second)) {
+		rv_log("  object of \"%s\": returns this+0x%llX, %s: kept FUnknown",
+			r.name.c_str(), (uint64)l.off, it->second.c_str());
+		return;
+	}
+
+	// A short name (RTTI base, queryInterface IID) or, from a vtable typed
+	// before, a qualified one: both resolve in the scope
+	const qstring iface = resolve_type(VST3_SCOPE, it->second.c_str());
+	if (iface.empty()) {
+		rv_log("  object of \"%s\": %s not declared", r.name.c_str(),
+			it->second.c_str());
+		return;
+	}
+
+	if (!default_create_proto(r.create)) return; // user's, or done already
+
+	qstring d;
+	d.sprnt("%s *f(void *context);", iface.c_str());
+	if (!apply_definite_proto(r.create, d.c_str())) return;
+
+	rv_log("  object of \"%s\": returns this+0x%llX -> %s *", r.name.c_str(),
+		(uint64)l.off, iface.c_str());
+
+	// Decompiled again with the new return type: lvar indices may move
+	qstring label;
+	label.sprnt("object of \"%s\"", r.name.c_str());
+	type_return_base(r.create, label.c_str());
+}
 
 /**
  * @brief Whether the `<iface>_vtbl` type of @p iface fits in the vtable at @p
@@ -299,9 +377,6 @@ qstring largest_fit(const std::vector<qstring>& names, ea_t vt) {
 /**
  * @brief The interface to pick for an RTTI vtable: the one with the largest
  * fitting base
- *
- * Only returns one in `OBJECT_IFACES`, so a pin makes `add_rtti_vtables` stay
- * the same.
  *
  * @param vt  Vtable address point
  * @param ci  RTTI of the vtable
@@ -515,15 +590,19 @@ std::map<qstring, sval_t> read_query_interface(ea_t vt0) {
 	return r.found;
 }
 
-/**
- * @brief Whether the vtable at @p vt has a user type or a `_vtbl` type already
- */
-bool already_typed(ea_t vt) {
-	if (is_userti(vt)) return true;
+/** @brief The interface of an `X_vtbl` typed vtable, or empty */
+qstring vtbl_iface(ea_t vt) {
 	tinfo_t cur;
 	qstring n;
-	return get_tinfo(&cur, vt) && cur.get_type_name(&n) && n.ends_with("_vtbl");
+	if (!get_tinfo(&cur, vt) || !cur.get_type_name(&n) || !n.ends_with("_vtbl"))
+		return qstring();
+	n.resize(n.length() - 5);
+	return n;
 }
+
+/** @brief Whether the vtable at @p vt has a user type or a `_vtbl` type already
+ */
+bool already_typed(ea_t vt) { return is_userti(vt) || !vtbl_iface(vt).empty(); }
 
 /**
  * @brief Finds the vtables stored by the create function of @p r and pins their
@@ -544,15 +623,15 @@ void type_object(const class_rec_t& r) {
 	vf.apply_to(&cf->body, nullptr);
 
 	if (!vf.hits.empty()) {
-		return_var_finder_t rf;
-		rf.apply_to(&cf->body, nullptr);
-
+		// The object is the vtable store target that is returned
 		int var = vf.hits.front().var_idx;
-		for (const auto& h : vf.hits)
-			if (rf.vars.count(h.var_idx) != 0) {
-				var = h.var_idx;
-				break;
-			}
+		loc_t ret;
+		if (return_loc(cf, ret))
+			for (const auto& h : vf.hits)
+				if (h.var_idx == ret.var) {
+					var = h.var_idx;
+					break;
+				}
 		vts = vtbl::ctor_vtables(cf, var);
 	}
 
@@ -579,6 +658,7 @@ void type_object(const class_rec_t& r) {
 
 	bool qi_read = false;
 	std::map<qstring, sval_t> qi;
+	std::map<sval_t, qstring> ifaces; // this offset -> typed interface
 
 	for (const auto& [off, vt] : vts) {
 		qstring iface, why;
@@ -613,13 +693,18 @@ void type_object(const class_rec_t& r) {
 		if (already_typed(vt)) {
 			rv_log("  object of \"%s\": vtable %a at +0x%llX already typed",
 				r.name.c_str(), vt, (uint64)off);
+			const qstring cur = vtbl_iface(vt);
+			if (!cur.empty()) ifaces[off] = cur;
 			continue;
 		}
 
 		vtbl::pin(vt, (iface + "_vtbl").c_str());
+		ifaces[off] = iface;
 		rv_log("  object of \"%s\": vtable %a at +0x%llX -> %s", r.name.c_str(),
 			vt, (uint64)off, iface.c_str());
 	}
+
+	type_return(r, ifaces);
 }
 
 /**

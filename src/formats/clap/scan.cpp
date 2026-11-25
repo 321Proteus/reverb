@@ -9,6 +9,7 @@
 #include "label.hpp"
 #include "plugin.hpp"
 #include "decomp/analysis.hpp"
+#include "decomp/returns.hpp"
 #include "db/members.hpp"
 #include "ui/report.hpp"
 #include <bytes.hpp>
@@ -125,7 +126,14 @@ void scan() {
 			label_descriptor(d);
 
 		check_plugin_count(f.ea, descs.size());
-		label_plugins(member_ptr(f.ea, f.kind->type, "create_plugin"), descs);
+
+		// Typed const clap_plugin_t * by label_fn_table. C++ wrappers return
+		// &plugin->clap_plugin, often from a create function it forwards to
+		const ea_t create = member_ptr(f.ea, f.kind->type, "create_plugin");
+		if (create != BADADDR && create != 0)
+			rv::type_return_base(create, "create_plugin", 2);
+
+		label_plugins(create, descs);
 		g_descs.insert(g_descs.end(), descs.begin(), descs.end());
 	}
 
