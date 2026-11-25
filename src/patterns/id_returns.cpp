@@ -9,8 +9,16 @@
 
 namespace rv {
 
-// The compared value in an if condition (a call, or the result variable of
-// an inlined compare loop), and the branch that holds the match
+/**
+ * @brief The compared value in an if condition (a call, or the result variable
+ * of an inlined compare loop)
+ *
+ * Accepts `cmp`, `!cmp` and `cmp ==`/`!= 0`.
+ *
+ * @param c       Condition
+ * @param in_then Receives whether the match is in the then-branch
+ * @return The call or variable, or null
+ */
 static cexpr_t* cmp_operand(cexpr_t* c, bool& in_then) {
 	c = strip_casts(c);
 	in_then = false;
@@ -27,6 +35,10 @@ static cexpr_t* cmp_operand(cexpr_t* c, bool& in_then) {
 	return c->op == cot_call || c->op == cot_var ? c : nullptr;
 }
 
+/**
+ * @brief Whether @p e is a string literal, or the address of one in data; @p
+ * out receives its text
+ */
 static bool literal_expr(cexpr_t* e, qstring& out) {
 	e = strip_casts(e);
 	if (e->op == cot_ref) e = strip_casts(e->x);
@@ -39,21 +51,31 @@ static bool literal_expr(cexpr_t* e, qstring& out) {
 		   read_utf8(e->obj_ea, out) && !out.empty();
 }
 
+/**
+ * @brief Whether one of the arguments of @p call is a string literal; @p out
+ * receives it
+ */
 static bool literal_arg(cexpr_t* call, qstring& out) {
 	for (carg_t& a : *call->a)
 		if (literal_expr(&a, out)) return true;
 	return false;
 }
 
-// The statement itself, or the last one of a block. A branch that returns
-// ends in the return, even when it logs something first
+/**
+ * @brief The statement itself, or the last one of a block
+ *
+ * A branch that returns ends in the return, even when it logs something first.
+ */
 static cinsn_t* last_stmt(cinsn_t* i) {
 	if (i != nullptr && i->op == cit_block)
 		i = i->cblock->empty() ? nullptr : &i->cblock->back();
 	return i;
 }
 
-// return &x; or return x; (array decay)
+/**
+ * @brief The object that `return &x;` or `return x;` (array decay) returns, or
+ * BADADDR
+ */
 static ea_t returned_obj(cinsn_t* i) {
 	i = last_stmt(i);
 	if (i == nullptr || i->op != cit_return) return BADADDR;
@@ -63,7 +85,9 @@ static ea_t returned_obj(cinsn_t* i) {
 	return e->op == cot_obj ? e->obj_ea : BADADDR;
 }
 
-// return 0; or return nullptr;
+/**
+ * @brief Whether @p i returns `0` or `nullptr`
+ */
 static bool returns_null(cinsn_t* i) {
 	i = last_stmt(i);
 	if (i == nullptr || i->op != cit_return) return false;
@@ -72,10 +96,16 @@ static bool returns_null(cinsn_t* i) {
 	return e->op == cot_num && e->numval() == 0;
 }
 
+/**
+ * @brief Whether @p c is an `&&` or `||`
+ */
 static bool is_compound(const cexpr_t* c) {
 	return c->op == cot_land || c->op == cot_lor;
 }
 
+/**
+ * @brief Finds the statement carrying the goto label @c num
+ */
 struct label_finder_t : public ctree_visitor_t {
 	int num;
 	cinsn_t* found = nullptr;
@@ -89,7 +119,10 @@ struct label_finder_t : public ctree_visitor_t {
 	}
 };
 
-// Result variables of inlined compare loops, mapped to the literal:
+/**
+ * @brief Maps the result variables of inlined compare loops to the literal they
+ * compare with
+ */
 struct inline_cmp_finder_t : public ctree_visitor_t {
 	const std::set<int>& vars;
 	std::map<int, qstring> ids;
@@ -129,10 +162,14 @@ struct inline_cmp_finder_t : public ctree_visitor_t {
 	}
 };
 
+/**
+ * @brief Finds the `if (cmp(id, "literal")) return obj;` patterns of a function
+ */
 struct id_return_finder_t : public ctree_visitor_t {
 	cfunc_t* cf;
 	std::set<int> vars;
-	std::map<int, qstring> inline_ids;
+	std::map<int, qstring>
+		inline_ids; /**< Result variable of an inlined compare -> literal */
 	std::vector<id_return_t> out;
 
 	id_return_finder_t(cfunc_t* f, int var) : ctree_visitor_t(CV_FAST), cf(f) {
@@ -142,7 +179,13 @@ struct id_return_finder_t : public ctree_visitor_t {
 		inline_ids = std::move(icf.ids);
 	}
 
-	// cmp(id, "literal") in any of the accepted forms
+	/**
+	 * @brief Whether @p c is `cmp(id, "literal")` in any of the accepted forms
+	 *
+	 * @param c       Condition
+	 * @param in_then Receives whether the match is in the then-branch
+	 * @param id      Receives the literal
+	 */
 	bool id_cmp(cexpr_t* c, bool& in_then, qstring& id) {
 		cexpr_t* x = cmp_operand(c, in_then);
 		if (x == nullptr) return false;
@@ -155,11 +198,16 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return arg_pos(x, vars) >= 0 && literal_arg(x, id);
 	}
 
-	/*
-		The object a matched branch returns. A goto is followed to its label,
-		and a branch ending in if (other) return x; makes the match
-		conditional
-	*/
+	/**
+	 * @brief The object a matched branch returns
+	 *
+	 * A goto is followed to its label, and a branch ending in `if (other)
+	 * return x;` makes the match conditional.
+	 *
+	 * @param i    Branch
+	 * @param cond Set when the match is conditional
+	 * @return The returned object, or BADADDR
+	 */
 	ea_t branch_obj(cinsn_t* i, bool& cond, int depth = 0) {
 		i = last_stmt(i);
 		if (i == nullptr || depth > 4) return BADADDR;
@@ -176,8 +224,13 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return returned_obj(i);
 	}
 
-	// Ids of a compound condition that make it true, so they match in the
-	// then-branch.
+	/**
+	 * @brief Collects the ids of a compound condition that make it true, so
+	 * they match in the then-branch
+	 *
+	 * @param cond Ids are conditional (under an `&&`)
+	 * @return false if the condition cannot be read that way
+	 */
 	bool collect(cexpr_t* c, bool cond, std::vector<id_return_t>& ids) {
 		c = strip_casts(c);
 		if (is_compound(c)) {
@@ -196,7 +249,10 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return true;
 	}
 
-	// The ids an if compares with, and whether they match in the then-branch
+	/**
+	 * @brief The ids an if compares with, and whether they match in the
+	 * then-branch
+	 */
 	bool id_check(cinsn_t* i, bool& in_then, std::vector<id_return_t>& ids) {
 		ids.clear();
 		if (i->op != cit_if) return false;
@@ -225,6 +281,10 @@ struct id_return_finder_t : public ctree_visitor_t {
 		return true;
 	}
 
+	/**
+	 * @brief Records @p ids as returning what the branch returns, if it returns
+	 * an object
+	 */
 	void add(std::vector<id_return_t>& ids, cinsn_t* branch) {
 		bool cond = false;
 		const ea_t ea = branch_obj(branch, cond);
