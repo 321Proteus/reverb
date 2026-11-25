@@ -15,7 +15,8 @@ void term();
 /** @brief Opens the panel, or refreshes it and brings it to front */
 void show();
 
-/** @brief show() once the current event has returned, e.g. from an IDB callback */
+/** @brief show() once the current event has returned, e.g. from an IDB callback
+ */
 void show_later();
 
 /** @brief Closes the panel */

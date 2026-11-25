@@ -35,7 +35,7 @@ struct val_t {
 	loc_t loc;			/**< For LOCAL */
 	uchar raw[16] = {}; /**< Bytes of a wide constant */
 	int raw_len = 0;
-	qstring str;		/**< For STR */
+	qstring str; /**< For STR */
 };
 
 /**
@@ -360,9 +360,10 @@ struct store_collector_t : public ctree_visitor_t {
  * Calls point into the cfunc and live as long as it does.
  */
 struct literal_collector_t : public ctree_visitor_t {
-	std::vector<qstring> strs;	 /**< Distinct string literals */
-	std::vector<uint64> rets;	 /**< Constants returned */
-	std::vector<uint64> asgs;	 /**< Constants assigned to locals: `result = 2400; break;` */
+	std::vector<qstring> strs; /**< Distinct string literals */
+	std::vector<uint64> rets;  /**< Constants returned */
+	std::vector<uint64>
+		asgs; /**< Constants assigned to locals: `result = 2400; break;` */
 	std::vector<cexpr_t*> calls; /**< Calls */
 
 	literal_collector_t() : ctree_visitor_t(CV_FAST) {}

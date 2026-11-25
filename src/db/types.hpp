@@ -1,7 +1,8 @@
 #pragma once
 /**
  * @file types.hpp
- * @brief Applying types at addresses and reading struct layouts from local types.
+ * @brief Applying types at addresses and reading struct layouts from local
+ * types.
  */
 #include "core/log.hpp"
 #include <pro.h>
@@ -13,7 +14,8 @@
 #include <vector>
 
 /**
- * @brief Applies the local type @p type_name at @p ea, replacing the items there
+ * @brief Applies the local type @p type_name at @p ea, replacing the items
+ * there
  *
  * @param out Receives the type, may be null
  * @return false if the type is missing, unsized or cannot be applied
@@ -44,8 +46,9 @@ namespace rv {
  * @brief A member layout from the local types
  */
 struct layout_t {
-	std::vector<field_desc_t> fields; /**< Members, nested structs flattened by path */
-	int size = 0;					  /**< Size of the struct in bytes, 0 if unknown */
+	std::vector<field_desc_t>
+		fields;	  /**< Members, nested structs flattened by path */
+	int size = 0; /**< Size of the struct in bytes, 0 if unknown */
 
 	/** @return The field named @p name (possibly a dotted path), or null */
 	const field_desc_t* find(const char* name) const {
@@ -180,7 +183,8 @@ inline bool load_layout(const char* type, layout_t& out) {
 }
 
 /**
- * @brief Finds a member of type @p target inside @p ti, searching nested structs
+ * @brief Finds a member of type @p target inside @p ti, searching nested
+ * structs
  *
  * @param base  Offset of @p ti in the outer struct
  * @param off   Receives the byte offset of the first match

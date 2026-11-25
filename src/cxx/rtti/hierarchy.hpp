@@ -27,8 +27,8 @@ struct class_node {
 class class_hierarchy {
 public:
 	/**
-	 * @brief Scan the IDB once. Run after auto-analysis finishes so vtable slots
-	 * point at analyzed code
+	 * @brief Scan the IDB once. Run after auto-analysis finishes so vtable
+	 * slots point at analyzed code
 	 */
 	void build();
 
@@ -54,7 +54,8 @@ public:
 	std::vector<const base_info*> direct_bases(ea_t ti) const;
 
 	/**
-	 * @brief Typeinfo of the class owning the vtable at @p vt (primary or secondary), or BADADDR
+	 * @brief Typeinfo of the class owning the vtable at @p vt (primary or
+	 * secondary), or BADADDR
 	 */
 	ea_t class_of_vtable(ea_t vt) const;
 

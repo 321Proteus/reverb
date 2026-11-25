@@ -11,10 +11,10 @@ namespace rv::til {
  * @brief Which type library to load
  */
 struct Request {
-	const char* label;			   /**< Name used in log messages */
-	const char* name;			   /**< The files: `rv_<name>[_v<version>]_<abi>.til` */
+	const char* label; /**< Name used in log messages */
+	const char* name;  /**< The files: `rv_<name>[_v<version>]_<abi>.til` */
 	const char* version = nullptr; /**< nullptr if unversioned */
-	bool import_types = true;	   /**< Also copy every type into the local types */
+	bool import_types = true; /**< Also copy every type into the local types */
 };
 
 /**

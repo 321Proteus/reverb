@@ -25,7 +25,8 @@ public:
 	void build();
 	/** @return Addresses of pointers to @p target, or null if none */
 	const std::vector<ea_t>* ptr_refs(ea_t target) const;
-	/** @return Addresses of 32-bit RVAs of @p target (64-bit PE only), or null */
+	/** @return Addresses of 32-bit RVAs of @p target (64-bit PE only), or null
+	 */
 	const std::vector<ea_t>* rva_refs(ea_t target) const;
 	/** @return The whole pointer map */
 	const map_t& ptrs() const { return ptrs_; }

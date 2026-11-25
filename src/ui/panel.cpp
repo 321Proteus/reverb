@@ -41,12 +41,12 @@ static int g_icon = -1;
  * @brief The lines shown
  */
 static strvec_t g_lines;
-static std::vector<int> g_src; /**< Entry index behind each line, -1 if none */
+static std::vector<int> g_src;	/**< Entry index behind each line, -1 if none */
 static std::set<size_t> g_open; /**< Expanded groups, by entry index */
 
 /**
- * @brief @p s with bytes below 0x20 replaced by `?`: they are color tags, and the
- * recovered strings usually have some
+ * @brief @p s with bytes below 0x20 replaced by `?`: they are color tags, and
+ * the recovered strings usually have some
  */
 static qstring printable(const qstring& s) {
 	qstring r = s;
@@ -71,8 +71,8 @@ static bool is_row(report::entry_kind_t k) {
 }
 
 /**
- * @brief Widest key among the rows (or the children) from entry @p i on, until the
- * next heading
+ * @brief Widest key among the rows (or the children) from entry @p i on, until
+ * the next heading
  */
 static size_t key_width(size_t i, bool children) {
 	const auto& es = report::entries();

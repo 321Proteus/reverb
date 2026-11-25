@@ -41,8 +41,8 @@ struct field_desc_t {
 struct object_fields_t {
 	int root = -1;		/**< lvar the object lives behind */
 	int64 base_off = 0; /**< Offset of the object inside root */
-	std::map<qstring, field_val_t> fields;	/**< Value of each field */
-	std::map<qstring, uint64> or_bits;		/**< Fields built up with `|=` */
+	std::map<qstring, field_val_t> fields; /**< Value of each field */
+	std::map<qstring, uint64> or_bits;	   /**< Fields built up with `|=` */
 };
 
 /**

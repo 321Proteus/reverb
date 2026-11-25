@@ -7,7 +7,6 @@
  * @brief SSE intrinsics as Hex-Rays prints them, matched on the ctree.
  */
 
-
 /**
  * @brief Matches a store intrinsic, `_mm_storeu_si128(ptr, value)`, writing
  * @p size bytes at @p ptr

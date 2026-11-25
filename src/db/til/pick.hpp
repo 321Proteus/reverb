@@ -1,7 +1,8 @@
 #pragma once
 /**
  * @file pick.hpp
- * @brief Parsing of til file names and choosing the til that matches a library version.
+ * @brief Parsing of til file names and choosing the til that matches a library
+ * version.
  */
 
 #include <cstdio>

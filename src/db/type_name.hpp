@@ -43,8 +43,10 @@ constexpr PrefixList make_prefixes(const char* const (&a)[N]) {
  * @brief The namespaces one format may look types up in
  */
 struct TypeScope {
-	const char* id;		   /**< Cache key */
-	PrefixList prefixes; /**< Tried in order, `""` is the flat name; the first is also what resolve_type_or_default() falls back to */
+	const char* id; /**< Cache key */
+	PrefixList
+		prefixes; /**< Tried in order, `""` is the flat name; the first is also
+					 what resolve_type_or_default() falls back to */
 };
 
 inline constexpr const char* VST3_PREFIXES[] = {
