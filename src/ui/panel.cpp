@@ -11,19 +11,43 @@
 
 namespace rv::panel {
 
+/**
+ * @brief Title of the panel
+ */
 static constexpr const char* TITLE = "REverb";
+/**
+ * @brief Id of the action that opens the panel
+ */
 static constexpr const char* ACTION = "reverb:show_panel";
+/**
+ * @brief Menu the action is attached to
+ */
 static constexpr const char* MENU = "View/Open subviews/";
 
+/**
+ * @brief The panel widget, null when closed
+ */
 static TWidget* g_widget = nullptr;
+/**
+ * @brief The custom viewer inside the panel
+ */
 static TWidget* g_viewer = nullptr;
 
+/**
+ * @brief Icon of the action and the panel, -1 if not loaded
+ */
 static int g_icon = -1;
+/**
+ * @brief The lines shown
+ */
 static strvec_t g_lines;
-static std::vector<int> g_src;	// entry index behind each line, -1 if none
-static std::set<size_t> g_open; // expanded groups, by entry index
+static std::vector<int> g_src; /**< Entry index behind each line, -1 if none */
+static std::set<size_t> g_open; /**< Expanded groups, by entry index */
 
-// Bytes below 0x20 are color tags, and the recovered strings usually have some
+/**
+ * @brief @p s with bytes below 0x20 replaced by `?`: they are color tags, and the
+ * recovered strings usually have some
+ */
 static qstring printable(const qstring& s) {
 	qstring r = s;
 	for (size_t i = 0; i < r.length(); i++)
@@ -31,16 +55,25 @@ static qstring printable(const qstring& s) {
 	return r;
 }
 
+/**
+ * @brief Appends a line backed by the entry @p src
+ */
 static void add(const qstring& line, int src = -1) {
 	g_lines.push_back(simpleline_t(line));
 	g_src.push_back(src);
 }
 
+/**
+ * @brief Whether @p k is a row or a group
+ */
 static bool is_row(report::entry_kind_t k) {
 	return k == report::ROW || k == report::GROUP;
 }
 
-// Widest key among the rows (or the children) from i on
+/**
+ * @brief Widest key among the rows (or the children) from entry @p i on, until the
+ * next heading
+ */
 static size_t key_width(size_t i, bool children) {
 	const auto& es = report::entries();
 	size_t w = 0;
@@ -51,6 +84,10 @@ static size_t key_width(size_t i, bool children) {
 	return w;
 }
 
+/**
+ * @brief Formats an aligned key/value line; the value is colored by its first
+ * character (string or parenthesized note)
+ */
 static qstring row_line(
 	const char* indent, size_t w, const qstring& key, const qstring& value) {
 	const qstring v = printable(value);
@@ -63,6 +100,9 @@ static qstring row_line(
 	return l;
 }
 
+/**
+ * @brief Rebuilds #g_lines and #g_src from the report
+ */
 static void build() {
 	g_lines.clear();
 	g_src.clear();
@@ -106,6 +146,9 @@ static void build() {
 	}
 }
 
+/**
+ * @brief Entry index behind the line under the cursor of @p cv, or -1
+ */
 static int src_at(TWidget* cv) {
 	int x, y;
 	place_t* p = get_custom_viewer_place(cv, false, &x, &y);
@@ -115,7 +158,9 @@ static int src_at(TWidget* cv) {
 	return n < g_src.size() ? g_src[n] : -1;
 }
 
-// Rebuilds the lines, keeping the cursor where it was
+/**
+ * @brief Rebuilds the lines, keeping the cursor where it was
+ */
 static void rebuild(TWidget* cv) {
 	int x = 0, y = 0;
 	place_t* p = get_custom_viewer_place(cv, false, &x, &y);
@@ -129,7 +174,9 @@ static void rebuild(TWidget* cv) {
 	jumpto(cv, &at, x, y);
 }
 
-// Folds or unfolds a group, otherwise jumps to the entry's address
+/**
+ * @brief Folds or unfolds a group, otherwise jumps to the entry's address
+ */
 static bool activate(TWidget* cv) {
 	const int src = src_at(cv);
 	if (src < 0) return false;
@@ -146,18 +193,32 @@ static bool activate(TWidget* cv) {
 	return true;
 }
 
+/**
+ * @brief Double-click handler, see activate()
+ */
 static bool idaapi on_dblclick(TWidget* cv, int, void*) { return activate(cv); }
 
+/**
+ * @brief Enter key handler, see activate()
+ */
 static bool idaapi on_key(TWidget* cv, int key, int shift, void*) {
 	return key == IK_RETURN && shift == 0 && activate(cv);
 }
 
+/**
+ * @brief Forgets the widget when the panel is closed
+ */
 static void idaapi on_close(TWidget* cv, void*) {
 	if (cv != g_viewer) return;
 	g_viewer = nullptr;
 	g_widget = nullptr;
 }
 
+/**
+ * @brief Loads the SVG logo as a custom icon
+ *
+ * @return The icon id, or -1
+ */
 static int load_logo() {
 	const char* svg = strchr(RV_LOGO_SVG, '<');
 	if (svg == nullptr) return -1;
@@ -167,6 +228,9 @@ static int load_logo() {
 	return id > 0 ? id : -1;
 }
 
+/**
+ * @brief Viewer event handlers
+ */
 static const custom_viewer_handlers_t HANDLERS(
 	on_key, nullptr, nullptr, nullptr, on_dblclick, nullptr, on_close);
 
@@ -211,6 +275,9 @@ void close() {
 }
 
 namespace {
+/**
+ * @brief Action handler that opens the panel
+ */
 struct show_ah_t : public action_handler_t {
 
 	int idaapi activate(action_activation_ctx_t*) override {
@@ -225,6 +292,9 @@ struct show_ah_t : public action_handler_t {
 
 show_ah_t g_show_ah;
 
+/**
+ * @brief UI request that opens the panel once the current event returned
+ */
 struct show_req_t : public ui_request_t {
 	bool idaapi run() override {
 		show();
