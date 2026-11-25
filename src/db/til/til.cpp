@@ -13,10 +13,17 @@
 
 namespace rv::til {
 
-// The ABI the type libraries are built for, nullptr if there are none
+/** @brief The ABI the type libraries are built for, nullptr if there are none
+ */
 static const char* get_til_abi() {
-	if (inf_get_filetype() != f_PE) return nullptr;
-	return inf_is_64bit() ? "msvc64" : "msvc32";
+	const filetype_t ft = inf_get_filetype();
+	const bool is64 = inf_is_64bit();
+
+	if (ft == f_ELF) return is64 ? "itanium64" : nullptr;
+	if (ft != f_PE) return nullptr;
+
+	if (inf_get_cc_id() == COMP_GNU) return is64 ? "itanium64" : nullptr;
+	return is64 ? "msvc64" : "msvc32";
 }
 
 struct scanner_t : file_enumerator_t {
