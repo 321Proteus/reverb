@@ -25,6 +25,13 @@
 #include "ui/report.hpp"
 #include "db/report.hpp"
 
+/**
+ * @brief Find and load the TIL library containing the plugin format types
+ *
+ * @param import whether or not to load the types into IDA local types
+ * @sa rv::til::Request
+ * @return true if the TIL load succeeded
+ */
 static bool format_til(bool import) {
 
 	rv::til::Request req{ "Format", "formats" };
@@ -85,8 +92,11 @@ static void report_overview(rv::InterfaceSet is) {
 	rv::report::row("framework", f);
 }
 
-// Scan pending: on the first auto_empty_finally for a new database, or the
-// first auto_empty for a reopened one (it has no final pass left to run)
+/**
+ * @brief Scan pending: on the first auto_empty_finally for a new database, or
+ * the first auto_empty for a reopened one (it has no final pass left to run)
+ *
+ */
 enum class pending_t { NONE, FINAL, EMPTY };
 static pending_t g_pending = pending_t::NONE;
 
@@ -112,7 +122,7 @@ static void run_scan(rv::InterfaceSet is) {
 	rv::panel::show_later();
 }
 
-// Classify the format(s) and framework + load types
+/** @brief Classify the format(s) and framework + load types */
 static rv::InterfaceSet detect() {
 	std::vector<qstring> exports;
 	int n = get_entry_qty();
