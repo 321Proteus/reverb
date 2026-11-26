@@ -11,3 +11,5 @@ target_sources(reverb PRIVATE
 )
 
 rv_embed_types(vst3)
+
+rv_host_sources(host.cpp)
