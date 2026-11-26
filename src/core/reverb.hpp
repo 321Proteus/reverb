@@ -1,6 +1,7 @@
 #pragma once
 
-#include <pro.h>
+#include <cstdint>
+
 namespace rv {
 /**
  * @brief A single plugin binary format that can be detected by REverb
@@ -55,8 +56,10 @@ public:
 	}
 
 private:
-	static constexpr uint32 bit(Interface i) { return 1u << unsigned(i); }
-	uint32 value_ = 0;
+	static constexpr std::uint32_t bit(Interface i) {
+		return 1u << unsigned(i);
+	}
+	std::uint32_t value_ = 0;
 };
 
 /**
