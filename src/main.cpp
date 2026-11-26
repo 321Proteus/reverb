@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
+#include "debugger/launch.hpp"
 
 /**
  * @brief Find and load the TIL library containing the plugin format types
@@ -150,6 +151,9 @@ static rv::InterfaceSet detect() {
 
 	rv::set_detected_framework(rv::scan_framework());
 	rv::apply_framework_types(formats, rv::get_detected_framework());
+
+	if (!formats.empty()) rv::debug::configure_minihost(formats);
+
 	return formats;
 }
 
