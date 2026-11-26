@@ -9,6 +9,8 @@
 #include "core/log.hpp"
 #include <dbg.hpp>
 #include <diskio.hpp>
+#include <fpro.h>
+#include <kernwin.hpp>
 #include <nalt.hpp>
 #include <pro.h>
 
@@ -66,6 +68,23 @@ static bool is_minihost(const qstring& app) {
 	return qstrstr(qbasename(app.c_str()), "reverb-minihost") != nullptr;
 }
 
+/// The minihost's log file, set by configure_minihost
+static qstring g_log_path;
+
+/**
+ * @brief The log file of the minihost for this database: in the temp dir,
+ * named after the input file so that two IDA instances don't share one
+ */
+static qstring make_log_path(const char* input) {
+	char dir[QMAXPATH];
+	if (qtmpdir(dir, sizeof(dir)) == nullptr) return qstring();
+	qstring name;
+	name.sprnt("reverb-minihost-%s.log", qbasename(input));
+	char path[QMAXPATH];
+	qmakepath(path, sizeof(path), dir, name.c_str(), nullptr);
+	return path;
+}
+
 static qstring lower(const char* s) {
 	qstring out(s);
 	for (size_t i = 0; i < out.length(); i++)
@@ -100,17 +119,94 @@ bool configure_minihost(InterfaceSet formats) {
 		return false;
 	}
 
+	g_log_path = make_log_path(input);
+
 	qstring args;
-	args.sprnt(
+	if (!g_log_path.empty()) args.sprnt("--log \"%s\" ", g_log_path.c_str());
+	args.cat_sprnt(
 		"--format %s \"%s\"", lower(get_interface_name(*pick)).c_str(), input);
 
 	char sdir[QMAXPATH];
-	if (!qdirname(sdir, sizeof(sdir), input)) sdir[0] = '\n';
+	if (!qdirname(sdir, sizeof(sdir), input)) sdir[0] = '\0';
 
 	set_process_options(
 		host.c_str(), args.c_str(), nullptr, sdir, nullptr, nullptr, -1);
 	rv_log("Debugger set to run %s %s", host.c_str(), args.c_str());
 	return true;
+}
+
+// Following the minihost's log: the debuggee's stdout goes to the terminal
+// IDA was started from, if any, so the minihost also writes a file
+
+static qtimer_t g_timer = nullptr;
+static qoff64_t g_offset = 0;
+static qstring g_partial; ///< A line still being written
+
+/// Prints the lines added to the log since the last call
+static void drain_log() {
+	FILE* fp = qfopen(g_log_path.c_str(), "rb");
+	if (fp == nullptr) return; // not created yet
+
+	qfseek(fp, 0, SEEK_END);
+	const qoff64_t size = qftell(fp);
+	if (size < g_offset) { // truncated: a new run
+		g_offset = 0;
+		g_partial.clear();
+	}
+	qfseek(fp, g_offset, SEEK_SET);
+
+	char buf[4096];
+	ssize_t n;
+	while ((n = qfread(fp, buf, sizeof(buf))) > 0) {
+		g_offset += n;
+		g_partial.append(buf, n);
+	}
+	qfclose(fp);
+
+	for (size_t nl; (nl = g_partial.find('\n')) != qstring::npos;) {
+		msg("%s\n", g_partial.substr(0, nl).c_str());
+		g_partial.remove(0, nl + 1);
+	}
+}
+
+static int idaapi log_timer_cb(void*) {
+	drain_log();
+	return 200;
+}
+
+static void stop_following() {
+	if (g_timer == nullptr) return;
+	unregister_timer(g_timer);
+	g_timer = nullptr;
+	drain_log();
+	if (!g_partial.empty()) msg("%s\n", g_partial.c_str());
+	g_partial.clear();
+}
+
+static ssize_t idaapi dbg_cb(void*, int code, va_list) {
+	if (code == dbg_process_start) {
+		qstring app;
+		get_process_options(
+			&app, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+		if (g_log_path.empty() || !is_minihost(app)) return 0;
+
+		// The process hasn't run yet: a log left by an earlier run goes
+		qunlink(g_log_path.c_str());
+		g_offset = 0;
+		g_partial.clear();
+		if (g_timer == nullptr)
+			g_timer = register_timer(200, log_timer_cb, nullptr);
+	} else if (code == dbg_process_exit || code == dbg_process_detach) {
+		stop_following();
+	}
+	return 0;
+}
+
+void init() { hook_to_notification_point(HT_DBG, dbg_cb); }
+
+void term() {
+	stop_following();
+	unhook_from_notification_point(HT_DBG, dbg_cb);
 }
 
 } // namespace rv::debug

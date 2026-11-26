@@ -229,6 +229,7 @@ static plugmod_t* idaapi init(void) {
 	hook_to_notification_point(HT_UI, ui_event_cb, nullptr);
 	hook_to_notification_point(HT_IDB, idb_event_cb);
 	rv::panel::init();
+	rv::debug::init();
 
 	rv_log("plugin initialized");
 
@@ -236,6 +237,7 @@ static plugmod_t* idaapi init(void) {
 }
 
 static void idaapi term(void) {
+	rv::debug::term();
 	rv::panel::term();
 	unhook_from_notification_point(HT_UI, ui_event_cb);
 	unhook_from_notification_point(HT_IDB, idb_event_cb);

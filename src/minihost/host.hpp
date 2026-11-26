@@ -1,7 +1,6 @@
 #pragma once
 #include "core/reverb.hpp"
 #include "platform.hpp"
-#include <cstdarg>
 #include <cstdio>
 #include <memory>
 #include <optional>
@@ -12,24 +11,14 @@
  * @brief The per-format host interface of reverb-minihost.
  */
 
+/**
+ * @brief reverb-minihost's counterpart of rv_log: one flushed line on stdout,
+ * and in the log file when one is set (see rv::host::set_log_file)
+ */
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 1, 2)))
 #endif
-/**
- * @brief reverb-minihost's counterpart of rv_log: one flushed line on stdout,
- * so the output interleaves correctly with a debugger's
- */
-inline void rv_host_log(const char* fmt, ...) {
-	std::va_list va;
-	va_start(va, fmt);
-
-	std::printf("[minihost] ");
-	std::vprintf(fmt, va);
-	std::printf("\n");
-	std::fflush(stdout);
-
-	va_end(va);
-}
+void rv_host_log(const char* fmt, ...);
 
 namespace rv::host {
 
@@ -61,6 +50,14 @@ public:
 	/// Undoes load(), also after a partial one
 	virtual void unload() = 0;
 };
+
+/**
+ * @brief Also writes the log to @p path (truncated first): the REverb plugin
+ * follows it and shows it in IDA's Output window
+ *
+ * @return false if the file can't be opened
+ */
+bool set_log_file(const char* path);
 
 /**
  * @brief Parses a case-insensitive format name

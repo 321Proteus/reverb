@@ -2,8 +2,33 @@
 #include "formats/host.hpp"
 #include <algorithm>
 #include <cctype>
+#include <cstdarg>
+#include <cstdio>
+
+static std::FILE* g_log_file = nullptr;
+
+void rv_host_log(const char* fmt, ...) {
+	char line[2048];
+	std::va_list va;
+	va_start(va, fmt);
+	std::vsnprintf(line, sizeof(line), fmt, va);
+	va_end(va);
+
+	std::printf("[minihost] %s\n", line);
+	std::fflush(stdout);
+	if (g_log_file != nullptr) {
+		std::fprintf(g_log_file, "[minihost] %s\n", line);
+		std::fflush(g_log_file);
+	}
+}
 
 namespace rv::host {
+
+bool set_log_file(const char* path) {
+	if (g_log_file != nullptr) std::fclose(g_log_file);
+	g_log_file = std::fopen(path, "w");
+	return g_log_file != nullptr;
+}
 
 /**
  * @brief Create a lowercase version of the input string

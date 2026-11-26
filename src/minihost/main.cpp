@@ -33,6 +33,8 @@ static void usage(const char* argv0) {
 		"  --format F   vst2 | vst3 | clap\n"
 		"  --class N    which plugin of a multi-plugin module (default 0)\n"
 		"  --exit       load, then unload immediately (test)\n"
+		"  --log FILE   also write the log to FILE (the REverb plugin shows "
+		"it in IDA's Output window)\n"
 		"  -h, --help\n"
 		"\n"
 		"While running: 'info' prints the plugin state, 'quit' (or Ctrl-C) "
@@ -77,6 +79,11 @@ int main(int argc, char** argv) {
 				std::fprintf(stderr, "unknown format\n");
 				return 2;
 			}
+
+		} else if (a == "--log" && i + 1 < argc) {
+			const char* log = argv[++i];
+			if (!set_log_file(log))
+				std::fprintf(stderr, "can't open the log file %s\n", log);
 
 		} else if (a == "--class" && i + 1 < argc)
 			opts.class_index = std::atoi(argv[++i]);

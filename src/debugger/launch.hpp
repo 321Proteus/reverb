@@ -21,4 +21,13 @@ namespace rv::debug {
  */
 bool configure_minihost(InterfaceSet formats);
 
+/**
+ * @brief Hooks the debugger events: while a minihost configured here runs, its
+ * log is shown in the Output window
+ */
+void init();
+
+/** @brief Undoes init() */
+void term();
+
 } // namespace rv::debug
