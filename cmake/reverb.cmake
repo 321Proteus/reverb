@@ -38,3 +38,10 @@ function(rv_enable_warnings TARGET)
         target_compile_options(${TARGET} PRIVATE -Werror=return-type)
     endif()
 endfunction()
+
+# If the host is built, add host-side sources of the calling directory to reverb-minihost
+function(rv_host_sources)
+    if (TARGET reverb-minihost)
+        target_sources(reverb-minihost PRIVATE ${ARGN})
+    endif()
+endfunction()

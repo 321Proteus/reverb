@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/reverb.hpp"
+#include <pro.h>
 
 /**
  * @file framework.hpp

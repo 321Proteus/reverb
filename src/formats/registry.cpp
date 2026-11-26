@@ -20,6 +20,10 @@ static const FormatModule kVst2 = { RV_VST2_TYPES_SRC, &vst2::scan,
 static const FormatModule kClap = { RV_CLAP_TYPES_SRC, &clap::scan,
 	&clap::label };
 
+/**
+ * @brief Table of format modules for scanning, labelling, and type
+ * access
+ */
 const FormatModule* get_format_module(Interface iface) {
 	switch (iface) {
 	case rv::Interface::VST3: return &kVst3;

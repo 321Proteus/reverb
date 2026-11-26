@@ -32,6 +32,11 @@ target_include_directories(reverb PRIVATE
     ${RV_GENERATED_DIR}
 )
 
+option(RV_BUILD_MINIHOST "Build reverb-minihost" ON)
+if (RV_BUILD_MINIHOST)
+    add_subdirectory(src/minihost)
+endif()
+
 add_subdirectory(src)
 
 rv_enable_warnings(reverb)
