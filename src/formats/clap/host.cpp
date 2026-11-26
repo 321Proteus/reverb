@@ -15,10 +15,12 @@ struct clap_version {
 	uint32_t major, minor, revision;
 };
 
+typedef clap_version clap_version_t;
+
 struct clap_host;
 typedef clap_host clap_host_t;
 struct clap_host {
-	clap_version clap_version;
+	clap_version_t clap_version;
 	void* host_data;
 	const char* name;
 	const char* vendor;
@@ -31,7 +33,7 @@ struct clap_host {
 };
 
 struct clap_plugin_descriptor {
-	clap_version clap_version;
+	clap_version_t clap_version;
 	const char* id;
 	const char* name;
 	const char* vendor;
@@ -68,7 +70,7 @@ struct clap_plugin_factory {
 };
 
 struct clap_plugin_entry {
-	clap_version clap_version;
+	clap_version_t clap_version;
 	bool (*init)(const char* plugin_path);
 	void (*deinit)();
 	const void* (*get_factory)(const char* factory_id);
