@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
+#include "debugger/breakpoint.hpp"
 #include "debugger/launch.hpp"
 
 /**
@@ -119,6 +120,7 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::debug::add_breakpoints(is, rv::get_detected_framework().fw);
 	rv::store_report(rv::report::entries());
 	rv::panel::show_later();
 }

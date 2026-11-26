@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/reverb.hpp"
+#include "debugger/breakpoint.hpp"
 #include <pro.h>
 
 /**
@@ -33,6 +34,9 @@ struct FrameworkModule {
 	/** Base name of the type libraries, e.g. `"juce"` for
 	 * `rv_juce_v<version>_<abi>.til` */
 	const char* til_name = nullptr;
+
+	/** Functions to break on, by name (see bpt_spec_t) or null */
+	const bpt_spec_t* breakpoints = nullptr;
 };
 
 /**
