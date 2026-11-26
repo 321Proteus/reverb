@@ -1,3 +1,7 @@
+/**
+ * @file launch.cpp
+ * @todo Replace the log file with a loopback TCP channel
+ */
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
