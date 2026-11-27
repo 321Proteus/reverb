@@ -373,6 +373,7 @@ public:
 #else
 		const char *init_n = "ModuleEntry", *exit_n = "ModuleExit";
 #endif
+		host::step("entry");
 		if (void* init = lib.sym(init_n)) {
 			bundle_ = host::create_bundle_ref(opts.bundle_path);
 			rv_host_log("calling %s @ %p", init_n, init);
@@ -427,6 +428,7 @@ public:
 			return false;
 		}
 
+		host::step("create");
 		void* obj = nullptr;
 		tresult r = fv->createInstance(factory_, cid_, IID_IComponent.b, &obj);
 		if (r != kResultOk || obj == nullptr) {
@@ -438,6 +440,7 @@ public:
 		rv_host_log(
 			"IComponent @ %p, vtable @ %p", obj, (void*)component_->__vftable);
 
+		host::step("init");
 		r = component_->__vftable->initialize(
 			component_, (FUnknown*)&g_host_app);
 		rv_host_log("IComponent::initialize -> %d", r);

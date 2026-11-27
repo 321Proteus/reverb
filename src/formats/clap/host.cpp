@@ -275,6 +275,7 @@ public:
 			(const void*)entry_, entry_->clap_version.major,
 			entry_->clap_version.minor, entry_->clap_version.revision);
 
+		host::step("entry");
 		if (!entry_->init(opts.bundle_path.c_str())) {
 			rv_host_log("clap_entry.init failed");
 			entry_ = nullptr;
@@ -304,6 +305,7 @@ public:
 
 		const clap_plugin_descriptor* d =
 			factory->get_plugin_descriptor(factory, (unsigned)opts.class_index);
+		host::step("create");
 		plugin_ = d ? factory->create_plugin(factory, &g_host, d->id) : nullptr;
 		if (plugin_ == nullptr) {
 			rv_host_log("create_plugin failed");
@@ -314,6 +316,7 @@ public:
 			(const void*)plugin_, (void*)plugin_->init,
 			(void*)plugin_->process);
 
+		host::step("init");
 		bool ok = plugin_->init(plugin_);
 		rv_host_log("clap_plugin.init -> %d", ok);
 

@@ -215,6 +215,7 @@ public:
 			return false;
 		}
 
+		host::step("entry");
 		effect_ = entry(host_callback);
 		if (effect_ == nullptr || effect_->magic != kEffectMagic) {
 			rv_host_log(
@@ -227,6 +228,7 @@ public:
 			(void*)effect_, (unsigned)effect_->uniqueID, effect_->numInputs,
 			effect_->numOutputs, effect_->numParams, (unsigned)effect_->flags);
 
+		host::step("init");
 		dispatch(effOpen);
 		return true;
 	}
