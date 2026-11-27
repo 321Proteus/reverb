@@ -174,7 +174,7 @@ void Engine::thread_main() {
 	std::vector<NoteEvent> notes;
 
 	int64_t pos = 0;
-	float wnd_peak = 0.f;
+	float wnd_peak = 0.f, last_wnd_peak = 0.f;
 	int64_t wnd_frames = 0;
 
 	bool log_first = false;
@@ -205,11 +205,15 @@ void Engine::thread_main() {
 
 		pos += s.block_size;
 		blocks_++;
+
+		// The peak of the last full second and the one under way, so that a
+		// short run reports one too
 		wnd_peak = std::max(wnd_peak, peak);
 		wnd_frames += s.block_size;
+		peak_ = std::max(last_wnd_peak, wnd_peak);
 
 		if (wnd_frames >= int64_t(s.sample_rate)) {
-			peak_ = wnd_peak;
+			last_wnd_peak = wnd_peak;
 			wnd_peak = 0.f;
 			wnd_frames = 0;
 		}

@@ -3,6 +3,7 @@
 #include "platform.hpp"
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -15,7 +16,8 @@
 
 /**
  * @brief reverb-minihost's counterpart of rv_log: one flushed line on stdout,
- * and in the log file when one is set (see rv::host::set_log_file)
+ * in the log file when one is set (see rv::host::set_log_file()) and on the
+ * plugin's channel when connected (see rv::host::connect_channel())
  */
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 1, 2)))
@@ -128,6 +130,17 @@ public:
 	/// Undoes load(), also after a partial one
 	virtual void unload() = 0;
 };
+
+/**
+ * @brief Connects to the REverb plugin at @p address. The
+ * log goes there too, and each line it sends is passed to @p on_line, on a
+ * thread of its own
+ * @param address the target address ("127.0.0.1:<port>")
+ * @param on_line the callback to execute the sent lines to
+ * @return false if the connection failed
+ */
+bool connect_channel(const std::string& address,
+	std::function<void(const std::string&)> on_line);
 
 /**
  * @brief Also writes the log to @p path (truncated first): the REverb plugin

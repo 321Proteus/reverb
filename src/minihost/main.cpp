@@ -45,6 +45,8 @@ static void usage(const char* argv0) {
 		"  --paused         activate, but don't run blocks until 'play'\n"
 		"  --fast           don't pace the blocks in real time\n"
 		"  --no-process     stop after creating the instance\n"
+		"  --connect A  connect to the REverb plugin at A (127.0.0.1:port):\n"
+		"               the log goes to IDA, and IDA can send commands\n"
 		"  --log FILE   also write the log to FILE (the REverb plugin shows "
 		"it in IDA's Output window)\n"
 		"  -h, --help\n"
@@ -54,38 +56,49 @@ static void usage(const char* argv0) {
 		argv0);
 }
 
-// Commands come from a background thread so the main thread can keep servicing
-// the plugin. EOF just stops reading: the host may be started with no stdin.
+/**
+ * @brief Runs one command, from stdin or the REverb plugin's channel. Replies
+ * go through the log, so they reach IDA too.
+ */
+static void handle_command(const std::string& line) {
+	Engine* e = g_engine;
+
+	if (line == "quit" || line == "q" || line == "exit") g_quit = true;
+
+	else if (line == "info" || line == "i")
+		g_info = true;
+
+	else if (e && line == "play") {
+		e->play();
+		rv_host_log("playing");
+
+	} else if (e && line == "pause") {
+		e->pause();
+		rv_host_log("paused");
+
+	} else if (e && line.rfind("blocks ", 0) == 0) {
+		const long long n = std::atoll(line.c_str() + 7);
+		e->run_blocks(n);
+		rv_host_log("running %lld blocks", n);
+
+	} else if (!line.empty())
+		rv_host_log("unknown command '%s'; commands: info, quit%s",
+			line.c_str(), e ? ", play, pause, blocks N" : "");
+}
+
 static void command_thread() {
 	std::string line;
-	while (std::getline(std::cin, line)) {
-		Engine* e = g_engine;
-
-		if (line == "quit" || line == "q" || line == "exit") g_quit = true;
-
-		else if (line == "info" || line == "i")
-			g_info = true;
-
-		else if (e && line == "play")
-			e->play();
-
-		else if (e && line == "pause")
-			e->pause();
-
-		else if (e && line.rfind("blocks ", 0) == 0)
-			e->run_blocks(std::atoll(line.c_str() + 7));
-
-		else if (!line.empty())
-			std::printf(
-				"commands: info, quit%s\n", e ? ", play, pause, blocks N" : "");
-	}
+	while (std::getline(std::cin, line))
+		handle_command(line);
 }
 
 int main(int argc, char** argv) {
 	std::string path;
 	std::optional<Interface> format;
 	LoadOptions opts;
+	std::string connect_to;
 	EngineOptions eng;
+
 	bool once = false;
 	bool processing = true;
 	bool paused = false;
@@ -107,6 +120,9 @@ int main(int argc, char** argv) {
 				std::fprintf(stderr, "unknown format\n");
 				return 2;
 			}
+
+		} else if (a == "--connect" && i + 1 < argc) {
+			connect_to = argv[++i];
 
 		} else if (a == "--log" && i + 1 < argc) {
 			const char* log = argv[++i];
@@ -160,6 +176,11 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 	mark_main_thread();
+
+	// First, so that IDA also gets the log of loading
+	if (!connect_to.empty() && !connect_channel(connect_to, handle_command))
+		rv_host_log(
+			"can't connect to the REverb plugin at %s", connect_to.c_str());
 
 	const HostModule* module = format ? get_host_module(*format) : nullptr;
 	if (module == nullptr) {

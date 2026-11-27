@@ -71,7 +71,7 @@ private:
 	std::atomic<bool> quit_{ false };
 	std::atomic<int64_t> budget_{ 0 }; ///< <0 unlimited, 0 paused
 	std::atomic<uint64_t> blocks_{ 0 };
-	std::atomic<float> peak_{ 0.f };	 ///< Of the last second of output
+	std::atomic<float> peak_{ 0.f }; ///< Of the last second or two of output
 	std::atomic<bool> started_{ false }; ///< start_processing() succeeded
 
 	std::vector<float> input_;

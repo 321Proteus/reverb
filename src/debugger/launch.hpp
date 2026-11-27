@@ -22,10 +22,21 @@ namespace rv::debug {
 bool configure_minihost(InterfaceSet formats);
 
 /**
- * @brief Hooks the debugger events: while a minihost configured here runs, its
- * log is shown in the Output window
+ * @brief Listens for the minihost and hooks the debugger events: while a
+ * minihost configured here runs, its log is shown in the Output window
  */
 void init();
+
+/** @brief True while a minihost is connected */
+bool minihost_connected();
+
+/**
+ * @brief Sends @p command to the minihost
+ *
+ * @param command the command to send (e.g. info, play, blocks N, quit)
+ * @return false if none is connected
+ */
+bool send_command(const char* command);
 
 /** @brief Undoes init() */
 void term();
