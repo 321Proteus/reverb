@@ -163,9 +163,9 @@ inline sock_t connect_to(const char* host, int port) {
 }
 
 enum : int {
-	CLOSED = 0,		  ///< The peer closed the connection
-	WOULD_BLOCK = -1, ///< Nothing to read yet (non-blocking)
-	ERROR = -2,		  ///< Error
+	RECV_CLOSED = 0,	   ///< The peer closed the connection
+	RECV_WOULD_BLOCK = -1, ///< Nothing to read yet (non-blocking)
+	RECV_ERROR = -2,	   ///< Error
 };
 
 /**
@@ -176,14 +176,14 @@ inline int recv_some(sock_t s, char* buf, size_t size) {
 	const auto n = recv(s, buf, int(size), 0);
 	if (n > 0) return int(n);
 
-	if (n == 0) return CLOSED;
+	if (n == 0) return RECV_CLOSED;
 
 #ifdef _WIN32
-	return WSAGetLastError() == WSAEWOULDBLOCK ? WOULD_BLOCK : ERROR;
+	return WSAGetLastError() == WSAEWOULDBLOCK ? RECV_WOULD_BLOCK : RECV_ERROR;
 #else
 	return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-			   ? WOULD_BLOCK
-			   : ERROR;
+			   ? RECV_WOULD_BLOCK
+			   : RECV_ERROR;
 #endif
 }
 

@@ -309,7 +309,7 @@ static void drain_channel() {
 	net::take_lines(
 		g_inbuf, [](const std::string& line) { msg("%s\n", line.c_str()); });
 
-	if (n == net::CLOSED || n == net::ERROR) {
+	if (n == net::RECV_CLOSED || n == net::RECV_ERROR) {
 		close_client();
 		rv_log("reverb-minihost disconnected");
 		refresh_controls();
