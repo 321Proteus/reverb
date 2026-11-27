@@ -1,5 +1,7 @@
 add_executable(reverb-minihost
     main.cpp
+    engine.cpp
+    engine.hpp
     host.cpp
     host.hpp
     platform.cpp

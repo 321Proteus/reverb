@@ -4,9 +4,12 @@
  * raw vtables, and the IIDs of iids.inc.
  */
 #include "formats/host.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace rv::vst3 {
 namespace {
@@ -66,11 +69,39 @@ struct IPluginFactory {
 };
 
 // IPluginBase + IComponent, up to the methods we call
+typedef uint8_t TBool;
+typedef int32 MediaType;	// kAudio, kEvent
+typedef int32 BusDirection; // kInput, kOutput
+enum : int32 { kAudio = 0, kEvent = 1, kInput = 0, kOutput = 1 };
+
+struct BusInfo {
+	MediaType mediaType;
+	BusDirection direction;
+	int32 channelCount;
+	TChar name[128];
+	int32 busType;
+	uint32 flags;
+};
+
+// IPluginBase + IComponent
 struct IComponent;
 struct IComponent_vtbl {
 	RV_FUNKNOWN_METHODS(IComponent)
 	tresult(RV_PLUGIN_API* initialize)(IComponent* self, FUnknown* context);
 	tresult(RV_PLUGIN_API* terminate)(IComponent* self);
+	tresult(RV_PLUGIN_API* getControllerClassId)(IComponent* self, char* cid);
+	tresult(RV_PLUGIN_API* setIoMode)(IComponent* self, int32 mode);
+	int32(RV_PLUGIN_API* getBusCount)(
+		IComponent* self, MediaType type, BusDirection dir);
+	tresult(RV_PLUGIN_API* getBusInfo)(IComponent* self, MediaType type,
+		BusDirection dir, int32 index, BusInfo* bus);
+	tresult(RV_PLUGIN_API* getRoutingInfo)(
+		IComponent* self, void* in, void* out);
+	tresult(RV_PLUGIN_API* activateBus)(IComponent* self, MediaType type,
+		BusDirection dir, int32 index, TBool state);
+	tresult(RV_PLUGIN_API* setActive)(IComponent* self, TBool state);
+	tresult(RV_PLUGIN_API* setState)(IComponent* self, void* state);
+	tresult(RV_PLUGIN_API* getState)(IComponent* self, void* state);
 };
 struct IComponent {
 	IComponent_vtbl* __vftable;
@@ -87,9 +118,143 @@ struct IHostApplication {
 	IHostApplication_vtbl* __vftable;
 };
 
+// Processing
+
+struct ProcessSetup {
+	int32 processMode;		  // kRealtime
+	int32 symbolicSampleSize; // kSample32
+	int32 maxSamplesPerBlock;
+	double sampleRate;
+};
+
+struct AudioBusBuffers {
+	int32 numChannels;
+	uint64_t silenceFlags;
+	float** channelBuffers32;
+};
+
+struct ProcessContext {
+	uint32 state;
+	double sampleRate;
+	int64_t projectTimeSamples;
+	int64_t systemTime;
+	int64_t continousTimeSamples;
+	double projectTimeMusic;
+	double barPositionMusic;
+	double cycleStartMusic;
+	double cycleEndMusic;
+	double tempo;
+	int32 timeSigNumerator;
+	int32 timeSigDenominator;
+	struct {
+		uint8_t keyNote;
+		uint8_t rootNote;
+		int16_t chordMask;
+	} chord;
+	int32 smpteOffsetSubframes;
+	struct {
+		uint32 framesPerSecond;
+		uint32 flags;
+	} frameRate;
+	int32 samplesToNextClock;
+};
+
+enum : uint32 { // ProcessContext::StatesAndFlags
+	kPlaying = 2,
+	kProjectTimeMusicValid = 512,
+	kTempoValid = 1024,
+	kBarPositionValid = 2048,
+	kTimeSigValid = 8192,
+	kContTimeValid = 131072,
+};
+
+struct NoteOnEvent {
+	int16_t channel;
+	int16_t pitch;
+	float tuning;
+	float velocity;
+	int32 length;
+	int32 noteId;
+};
+struct NoteOffEvent {
+	int16_t channel;
+	int16_t pitch;
+	float velocity;
+	int32 noteId;
+	float tuning;
+};
+
+struct Event {
+	int32 busIndex;
+	int32 sampleOffset;
+	double ppqPosition;
+	uint16_t flags;
+	uint16_t type; // kNoteOnEvent, kNoteOffEvent
+	union {
+		NoteOnEvent noteOn;
+		NoteOffEvent noteOff;
+		// The largest member, NoteExpressionTextEvent: sets size and alignment
+		struct {
+			uint32 typeId;
+			int32 noteId;
+			uint32 textLen;
+			const TChar* text;
+		} largest_;
+	};
+};
+static_assert(sizeof(void*) != 8 || sizeof(Event) == 48, "Event layout");
+enum : uint16_t { kNoteOnEvent = 0, kNoteOffEvent = 1 };
+
+struct IEventList;
+struct IEventList_vtbl {
+	RV_FUNKNOWN_METHODS(IEventList)
+	int32(RV_PLUGIN_API* getEventCount)(IEventList* self);
+	tresult(RV_PLUGIN_API* getEvent)(IEventList* self, int32 index, Event* e);
+	tresult(RV_PLUGIN_API* addEvent)(IEventList* self, Event* e);
+};
+struct IEventList {
+	IEventList_vtbl* __vftable;
+};
+
+struct ProcessData {
+	int32 processMode;
+	int32 symbolicSampleSize;
+	int32 numSamples;
+	int32 numInputs;
+	int32 numOutputs;
+	AudioBusBuffers* inputs;
+	AudioBusBuffers* outputs;
+	void* inputParameterChanges; // IParameterChanges, none sent
+	void* outputParameterChanges;
+	IEventList* inputEvents;
+	IEventList* outputEvents;
+	ProcessContext* processContext;
+};
+
+struct IAudioProcessor;
+struct IAudioProcessor_vtbl {
+	RV_FUNKNOWN_METHODS(IAudioProcessor)
+	tresult(RV_PLUGIN_API* setBusArrangements)(IAudioProcessor* self,
+		uint64_t* inputs, int32 numIns, uint64_t* outputs, int32 numOuts);
+	tresult(RV_PLUGIN_API* getBusArrangement)(
+		IAudioProcessor* self, BusDirection dir, int32 index, uint64_t* arr);
+	tresult(RV_PLUGIN_API* canProcessSampleSize)(
+		IAudioProcessor* self, int32 symbolicSampleSize);
+	uint32(RV_PLUGIN_API* getLatencySamples)(IAudioProcessor* self);
+	tresult(RV_PLUGIN_API* setupProcessing)(
+		IAudioProcessor* self, ProcessSetup* setup);
+	tresult(RV_PLUGIN_API* setProcessing)(IAudioProcessor* self, TBool state);
+	tresult(RV_PLUGIN_API* process)(IAudioProcessor* self, ProcessData* data);
+	uint32(RV_PLUGIN_API* getTailSamples)(IAudioProcessor* self);
+};
+struct IAudioProcessor {
+	IAudioProcessor_vtbl* __vftable;
+};
+
 #undef RV_FUNKNOWN_METHODS
 
 constexpr tresult kResultOk = 0;
+constexpr tresult kResultFalse = 1;
 #ifdef _WIN32 // E_NOINTERFACE
 constexpr tresult kNoInterface = (tresult)0x80004002;
 #else
@@ -152,6 +317,38 @@ tresult RV_PLUGIN_API host_create_instance(
 IHostApplication_vtbl g_host_vtbl = { host_qi, host_ref, host_ref,
 	host_get_name, host_create_instance };
 IHostApplication g_host_app = { &g_host_vtbl };
+
+/// The input IEventList: the block's notes, owned by the host
+struct HostEventList {
+	IEventList base;
+	Event events[16];
+	int32 count;
+};
+
+tresult RV_PLUGIN_API events_qi(IEventList* self, const char* iid, void** obj) {
+	if (IID_FUnknown == iid || IID_IEventList == iid) {
+		*obj = self;
+		return kResultOk;
+	}
+	*obj = nullptr;
+	return kNoInterface;
+}
+uint32 RV_PLUGIN_API events_ref(IEventList*) { return 1; }
+int32 RV_PLUGIN_API events_count(IEventList* self) {
+	return ((HostEventList*)self)->count;
+}
+tresult RV_PLUGIN_API events_get(IEventList* self, int32 index, Event* e) {
+	const HostEventList* l = (const HostEventList*)self;
+	if (index < 0 || index >= l->count || e == nullptr) return kResultFalse;
+	*e = l->events[index];
+	return kResultOk;
+}
+tresult RV_PLUGIN_API events_add(IEventList*, Event*) {
+	return kResultFalse; // an input list
+}
+
+IEventList_vtbl g_events_vtbl = { events_qi, events_ref, events_ref,
+	events_count, events_get, events_add };
 
 typedef IPluginFactory* (*GetFactoryFn)();
 typedef bool (*ModuleEntryFn)(void*);
@@ -249,11 +446,128 @@ public:
 	}
 
 	void describe() const override {
-		rv_host_log("VST3 \"%s\": factory %p, component %p", name_.c_str(),
-			(void*)factory_, (void*)component_);
+		rv_host_log("VST3 \"%s\": factory %p, component %p, processor %p",
+			name_.c_str(), (void*)factory_, (void*)component_,
+			(void*)processor_);
+	}
+
+	bool activate(const host::ProcessSetup& s) override {
+		if (component_ == nullptr) return false;
+		IComponent_vtbl* cv = component_->__vftable;
+
+		void* obj = nullptr;
+		if (cv->queryInterface(component_, IID_IAudioProcessor.b, &obj) !=
+				kResultOk ||
+			obj == nullptr) {
+			rv_host_log("the component is not an IAudioProcessor");
+			return false;
+		}
+		processor_ = (IAudioProcessor*)obj;
+		IAudioProcessor_vtbl* pv = processor_->__vftable;
+		rv_host_log("IAudioProcessor @ %p, vtable @ %p", obj, (void*)pv);
+
+		if (pv->canProcessSampleSize(processor_, 0) != kResultOk) {
+			rv_host_log("32-bit float processing is not supported");
+			return false;
+		}
+
+		// Every audio bus gets buffers; the main ones (index 0) are activated
+		ins_ = buses(kInput, s.block_size);
+		outs_ = buses(kOutput, s.block_size);
+		events_in_ = cv->getBusCount(component_, kEvent, kInput) > 0;
+		if (events_in_) cv->activateBus(component_, kEvent, kInput, 0, 1);
+
+		ProcessSetup ps = { 0, 0, int32(s.block_size), s.sample_rate };
+		tresult r = pv->setupProcessing(processor_, &ps);
+		rv_host_log("setupProcessing -> %d", r);
+		if (r != kResultOk) return false;
+
+		r = cv->setActive(component_, 1);
+		rv_host_log("setActive(true) -> %d", r);
+		active_ = r == kResultOk;
+
+		event_list_.base.__vftable = &g_events_vtbl;
+		return active_;
+	}
+
+	bool start_processing() override {
+		// kNotImplemented is fine: setProcessing is optional for the plugin
+		const tresult r = processor_->__vftable->setProcessing(processor_, 1);
+		rv_host_log("setProcessing(true) -> %d", r);
+		return true;
+	}
+
+	float process(const host::Block& b) override {
+		for (Bus& bus : ins_)
+			bus.ch.fill(b.input, b.frames);
+		for (Bus& bus : outs_)
+			bus.ch.clear(b.frames);
+
+		event_list_.count = 0;
+		for (size_t i = 0; i < b.num_notes && i < 16; i++) {
+			const host::NoteEvent& n = b.notes[i];
+			Event& e = event_list_.events[event_list_.count++];
+			e = {};
+			e.sampleOffset = int32(n.offset);
+			e.ppqPosition = b.ppq();
+			if (n.on) {
+				e.type = kNoteOnEvent;
+				e.noteOn = { 0, n.key, 0.f, n.velocity, 0, -1 };
+			} else {
+				e.type = kNoteOffEvent;
+				e.noteOff = { 0, n.key, 0.f, -1, 0.f };
+			}
+		}
+
+		const double ppq = b.ppq();
+		ProcessContext ctx = {};
+		ctx.state = kPlaying | kProjectTimeMusicValid | kTempoValid |
+					kBarPositionValid | kTimeSigValid | kContTimeValid;
+		ctx.sampleRate = b.sample_rate;
+		ctx.projectTimeSamples = b.sample_pos;
+		ctx.continousTimeSamples = b.sample_pos;
+		ctx.projectTimeMusic = ppq;
+		ctx.barPositionMusic = std::floor(ppq / 4.0) * 4.0;
+		ctx.tempo = b.tempo;
+		ctx.timeSigNumerator = 4;
+		ctx.timeSigDenominator = 4;
+
+		ProcessData d = {};
+		d.numSamples = int32(b.frames);
+		d.numInputs = int32(in_bufs_.size());
+		d.numOutputs = int32(out_bufs_.size());
+		d.inputs = in_bufs_.empty() ? nullptr : in_bufs_.data();
+		d.outputs = out_bufs_.empty() ? nullptr : out_bufs_.data();
+		d.inputEvents = events_in_ ? &event_list_.base : nullptr;
+		d.processContext = &ctx;
+
+		const tresult r = processor_->__vftable->process(processor_, &d);
+		if (r != kResultOk && !process_failed_) {
+			rv_host_log("process -> %d (only the first failure is logged)", r);
+			process_failed_ = true;
+		}
+
+		float peak = 0.f;
+		for (const Bus& bus : outs_)
+			peak = std::max(peak, bus.ch.peak(b.frames));
+		return peak;
+	}
+
+	void stop_processing() override {
+		processor_->__vftable->setProcessing(processor_, 0);
+	}
+
+	void deactivate() override {
+		if (active_) component_->__vftable->setActive(component_, 0);
+		active_ = false;
 	}
 
 	void unload() override {
+		if (processor_ != nullptr) {
+			processor_->__vftable->release(processor_);
+			processor_ = nullptr;
+		}
+
 		if (component_ != nullptr) {
 			component_->__vftable->terminate(component_);
 			component_->__vftable->release(component_);
@@ -272,8 +586,44 @@ public:
 	}
 
 private:
+	struct Bus {
+		host::Channels ch;
+	};
+
+	/// Buffers for every audio bus in @p dir, activating the main one
+	std::vector<Bus> buses(BusDirection dir, uint32 frames) {
+		IComponent_vtbl* cv = component_->__vftable;
+		const int32 n = cv->getBusCount(component_, kAudio, dir);
+		std::vector<Bus> out(size_t(n > 0 ? n : 0));
+		std::vector<AudioBusBuffers>& bufs =
+			dir == kInput ? in_bufs_ : out_bufs_;
+		bufs.assign(out.size(), AudioBusBuffers{});
+
+		for (int32 i = 0; i < n; i++) {
+			BusInfo info = {};
+			cv->getBusInfo(component_, kAudio, dir, i, &info);
+			const int32 ch = info.channelCount > 0 ? info.channelCount : 0;
+			out[i].ch.resize(uint32(ch), frames);
+			if (i == 0) cv->activateBus(component_, kAudio, dir, 0, 1);
+			rv_host_log("  audio %s bus %d: %d channels%s",
+				dir == kInput ? "input" : "output", i, ch,
+				i == 0 ? " (activated)" : "");
+		}
+		// The pointers after every resize, as the vector may move them
+		for (size_t i = 0; i < out.size(); i++)
+			bufs[i] = { int32(out[i].ch.count()), 0, out[i].ch.ptrs() };
+		return out;
+	}
+
 	IPluginFactory* factory_ = nullptr;
 	IComponent* component_ = nullptr;
+	IAudioProcessor* processor_ = nullptr;
+	std::vector<Bus> ins_, outs_;
+	std::vector<AudioBusBuffers> in_bufs_, out_bufs_;
+	HostEventList event_list_ = {};
+	bool events_in_ = false;
+	bool active_ = false;
+	bool process_failed_ = false;
 	void* bundle_ = nullptr;
 	ModuleExitFn exit_ = nullptr;
 	bool entered_ = false;
