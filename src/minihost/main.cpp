@@ -1,3 +1,4 @@
+#include "engine.hpp"
 #include "formats/host.hpp"
 #include "host.hpp"
 #include <atomic>
@@ -20,6 +21,7 @@ using namespace rv::host;
 
 static std::atomic<bool> g_quit{ false };
 static std::atomic<bool> g_info{ false };
+static std::atomic<Engine*> g_engine{ nullptr };
 
 static void on_signal(int) { g_quit = true; }
 
@@ -32,13 +34,23 @@ static void usage(const char* argv0) {
 		"               (the bundle is found from a binary inside one)\n"
 		"  --format F   vst2 | vst3 | clap\n"
 		"  --class N    which plugin of a multi-plugin module (default 0)\n"
-		"  --exit       load, then unload immediately (test)\n"
+		"  --exit       unload once loaded, or once --blocks are run (test)\n"
+		"\n"
+		"Processing (no audio device: a test signal in, the output dropped):\n"
+		"  --rate HZ        sample rate (default 48000)\n"
+		"  --block N        frames per block (default 512)\n"
+		"  --signal S       sine | impulse | noise | silence (default sine)\n"
+		"  --no-notes       no note every second for instruments\n"
+		"  --blocks N       run N blocks, then pause (default: keep playing)\n"
+		"  --paused         activate, but don't run blocks until 'play'\n"
+		"  --fast           don't pace the blocks in real time\n"
+		"  --no-process     stop after creating the instance\n"
 		"  --log FILE   also write the log to FILE (the REverb plugin shows "
 		"it in IDA's Output window)\n"
 		"  -h, --help\n"
 		"\n"
-		"While running: 'info' prints the plugin state, 'quit' (or Ctrl-C) "
-		"unloads it.\n",
+		"While running: 'info', 'play', 'pause', 'blocks N', 'quit' (or "
+		"Ctrl-C).\n",
 		argv0);
 }
 
@@ -47,13 +59,25 @@ static void usage(const char* argv0) {
 static void command_thread() {
 	std::string line;
 	while (std::getline(std::cin, line)) {
+		Engine* e = g_engine;
+
 		if (line == "quit" || line == "q" || line == "exit") g_quit = true;
 
 		else if (line == "info" || line == "i")
 			g_info = true;
 
+		else if (e && line == "play")
+			e->play();
+
+		else if (e && line == "pause")
+			e->pause();
+
+		else if (e && line.rfind("blocks ", 0) == 0)
+			e->run_blocks(std::atoll(line.c_str() + 7));
+
 		else if (!line.empty())
-			std::printf("commands: info, quit\n");
+			std::printf(
+				"commands: info, quit%s\n", e ? ", play, pause, blocks N" : "");
 	}
 }
 
@@ -61,7 +85,11 @@ int main(int argc, char** argv) {
 	std::string path;
 	std::optional<Interface> format;
 	LoadOptions opts;
+	EngineOptions eng;
 	bool once = false;
+	bool processing = true;
+	bool paused = false;
+	int64_t blocks = -1; // -1: play
 
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
@@ -88,6 +116,35 @@ int main(int argc, char** argv) {
 		} else if (a == "--class" && i + 1 < argc)
 			opts.class_index = std::atoi(argv[++i]);
 
+		else if (a == "--rate" && i + 1 < argc)
+			eng.setup.sample_rate = std::atof(argv[++i]);
+
+		else if (a == "--block" && i + 1 < argc)
+			eng.setup.block_size = uint32_t(std::atoi(argv[++i]));
+
+		else if (a == "--signal" && i + 1 < argc) {
+			auto sig = parse_signal(argv[++i]);
+			if (!sig) {
+				std::fprintf(stderr, "unknown signal\n");
+				return 2;
+			}
+			eng.signal = *sig;
+
+		} else if (a == "--blocks" && i + 1 < argc)
+			blocks = std::atoll(argv[++i]);
+
+		else if (a == "--no-notes")
+			eng.notes = false;
+
+		else if (a == "--paused")
+			paused = true;
+
+		else if (a == "--fast")
+			eng.realtime = false;
+
+		else if (a == "--no-process")
+			processing = false;
+
 		else if (!a.empty() && a[0] != '-' && path.empty())
 			path = a;
 
@@ -97,10 +154,12 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if (path.empty()) {
+	if (path.empty() || eng.setup.sample_rate < 1000 ||
+		eng.setup.block_size == 0 || eng.setup.block_size > 65536) {
 		usage(argv[0]);
 		return 2;
 	}
+	mark_main_thread();
 
 	const HostModule* module = format ? get_host_module(*format) : nullptr;
 	if (module == nullptr) {
@@ -133,7 +192,32 @@ int main(int argc, char** argv) {
 
 	host->describe();
 
-	if (!once) {
+	// --exit without --blocks is just load and unload
+	std::unique_ptr<Engine> engine;
+
+	if (processing && !(once && blocks < 0)) {
+		engine = std::make_unique<Engine>(*host, eng);
+		if (!engine->start()) engine.reset();
+	}
+
+	if (engine) {
+		if (paused) engine->pause();
+		else if (blocks >= 0)
+			engine->run_blocks(blocks);
+		else
+			engine->play();
+		g_engine = engine.get();
+	}
+
+	if (once && engine) {
+		// Until the blocks are run, still servicing the main thread
+		while (engine->busy() && !g_quit) {
+			host->idle();
+			pump_main_thread(10);
+		}
+		engine->describe();
+
+	} else if (!once) {
 		std::signal(SIGINT, on_signal);
 		std::signal(SIGTERM, on_signal);
 		std::thread(command_thread).detach();
@@ -144,10 +228,17 @@ int main(int argc, char** argv) {
 
 		while (!g_quit) {
 			host->idle();
-			if (g_info.exchange(false)) host->describe();
+			if (g_info.exchange(false)) {
+				host->describe();
+				if (engine) engine->describe();
+			}
 			pump_main_thread(50);
 		}
 	}
+
+	g_engine = nullptr;
+	if (engine) engine->stop();
+	engine.reset();
 
 	rv_host_log("unloading");
 	host->unload();
