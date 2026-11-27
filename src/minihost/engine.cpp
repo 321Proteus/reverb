@@ -77,6 +77,7 @@ Engine::~Engine() { stop(); }
 
 bool Engine::start() {
 	const ProcessSetup& s = opts_.setup;
+	step("activate");
 	if (!host_.activate(s)) {
 		rv_host_log("the plugin can't be activated: not processing");
 		return false;
@@ -100,6 +101,7 @@ void Engine::stop() {
 	}
 
 	if (active_) {
+		step("deactivate");
 		host_.deactivate();
 		active_ = false;
 		rv_host_log("deactivated after %llu blocks",
@@ -190,6 +192,7 @@ void Engine::thread_main() {
 		}
 
 		if (!started_) {
+			step("start");
 			if (!host_.start_processing()) {
 				rv_host_log("start_processing was refused, pausing");
 				budget_ = 0;
@@ -198,6 +201,7 @@ void Engine::thread_main() {
 			started_ = true;
 		}
 
+		if (pos == 0) step("process");
 		make_block(pos, s.block_size, &notes);
 		const Block block{ s.block_size, pos, s.sample_rate, opts_.tempo,
 			input_.data(), notes.data(), notes.size() };
@@ -243,6 +247,7 @@ void Engine::thread_main() {
 	}
 
 	if (started_) {
+		step("stop");
 		host_.stop_processing();
 		started_ = false;
 	}

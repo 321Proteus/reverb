@@ -46,6 +46,7 @@ struct host_settings_t {
 	qstring signal = "sine"; ///< sine, impulse, noise or silence
 	bool notes = true;
 	bool paused = false;
+	bool step = false; ///< Wait before each lifecycle phase for Next step
 	bool realtime = true;
 	bool process = true;
 	qstring extra; ///< Appended to the arguments as typed

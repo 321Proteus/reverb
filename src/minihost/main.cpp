@@ -45,6 +45,10 @@ static void usage(const char* argv0) {
 		"  --paused         activate, but don't run blocks until 'play'\n"
 		"  --fast           don't pace the blocks in real time\n"
 		"  --no-process     stop after creating the instance\n"
+		"  --step           wait before each lifecycle phase for 'next': "
+		"load,\n"
+		"                   entry, create, init, activate, start, process,\n"
+		"                   stop, deactivate, unload ('run' stops stepping)\n"
 		"  --connect A  connect to the REverb plugin at A (127.0.0.1:port):\n"
 		"               the log goes to IDA, and IDA can send commands\n"
 		"  --log FILE   also write the log to FILE (the REverb plugin shows "
@@ -63,14 +67,32 @@ static void usage(const char* argv0) {
 static void handle_command(const std::string& line) {
 	Engine* e = g_engine;
 
-	if (line == "quit" || line == "q" || line == "exit") g_quit = true;
+	if (line == "quit" || line == "q" || line == "exit") {
+		set_step_mode(false); // nothing waits for a step while quitting
+		g_quit = true;
 
-	else if (line == "info" || line == "i")
-		g_info = true;
+	} else if (line == "next" || line == "n") {
+		if (!step_next()) rv_host_log("not waiting at a step");
 
-	else if (e && line == "play") {
-		e->play();
-		rv_host_log("playing");
+	} else if (line == "run") {
+		set_step_mode(false);
+		rv_host_log("step mode off");
+	}
+
+	else if (line == "info" || line == "i") {
+		// While a step waits, the main thread may be the one waiting: answer
+		// here, without calling into the plugin
+		if (const char* phase = step_waiting())
+			rv_host_log("waiting before %s ('next' to go on)", phase);
+		else
+			g_info = true;
+	}
+
+	else if (line == "play") {
+		// Play means go: it also ends step mode
+		set_step_mode(false);
+		if (e) e->play();
+		rv_host_log(e ? "playing" : "step mode off");
 
 	} else if (e && line == "pause") {
 		e->pause();
@@ -82,8 +104,9 @@ static void handle_command(const std::string& line) {
 		rv_host_log("running %lld blocks", n);
 
 	} else if (!line.empty())
-		rv_host_log("unknown command '%s'; commands: info, quit%s",
-			line.c_str(), e ? ", play, pause, blocks N" : "");
+		rv_host_log("unknown command '%s'; commands: info, next, run, play, "
+					"quit%s",
+			line.c_str(), e ? ", pause, blocks N" : "");
 }
 
 static void command_thread() {
@@ -102,6 +125,7 @@ int main(int argc, char** argv) {
 	bool once = false;
 	bool processing = true;
 	bool paused = false;
+	bool stepping = false;
 	int64_t blocks = -1; // -1: play
 
 	for (int i = 1; i < argc; ++i) {
@@ -161,6 +185,9 @@ int main(int argc, char** argv) {
 		else if (a == "--no-process")
 			processing = false;
 
+		else if (a == "--step")
+			stepping = true;
+
 		else if (!a.empty() && a[0] != '-' && path.empty())
 			path = a;
 
@@ -197,6 +224,13 @@ int main(int argc, char** argv) {
 	if (opts.bundle_path != opts.binary_path)
 		rv_host_log("bundle: %s", opts.bundle_path.c_str());
 
+	// Commands are read from the start: in step mode, 'next' releases load
+	std::signal(SIGINT, on_signal);
+	std::signal(SIGTERM, on_signal);
+	if (!once || stepping) std::thread(command_thread).detach();
+	set_step_mode(stepping);
+
+	step("load");
 	SharedLib lib;
 	std::string err;
 	if (!lib.open(opts.binary_path, err)) {
@@ -216,7 +250,7 @@ int main(int argc, char** argv) {
 	// --exit without --blocks is just load and unload
 	std::unique_ptr<Engine> engine;
 
-	if (processing && !(once && blocks < 0)) {
+	if (processing && !g_quit && !(once && blocks < 0)) {
 		engine = std::make_unique<Engine>(*host, eng);
 		if (!engine->start()) engine.reset();
 	}
@@ -239,10 +273,6 @@ int main(int argc, char** argv) {
 		engine->describe();
 
 	} else if (!once) {
-		std::signal(SIGINT, on_signal);
-		std::signal(SIGTERM, on_signal);
-		std::thread(command_thread).detach();
-
 		rv_host_log(
 			"plugin is alive, attach a debugger to pid %d ('info', 'quit')",
 			(int)getpid());
@@ -261,6 +291,7 @@ int main(int argc, char** argv) {
 	if (engine) engine->stop();
 	engine.reset();
 
+	step("unload");
 	rv_host_log("unloading");
 	host->unload();
 	host.reset();

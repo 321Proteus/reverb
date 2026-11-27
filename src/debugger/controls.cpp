@@ -12,6 +12,7 @@
 #include "mh_play_svg_embed.h"
 #include "mh_quit_svg_embed.h"
 #include "mh_settings_svg_embed.h"
+#include "mh_step_svg_embed.h"
 
 namespace rv::debug {
 namespace {
@@ -106,13 +107,10 @@ bool edit_settings() {
 	}
 
 	sval_t cls = s.class_index, rate = s.sample_rate, block = s.block_size;
-	ushort checks = (s.notes ? 1 : 0) | (s.paused ? 2 : 0) |
+	ushort checks = (s.notes ? 1 : 0) | (s.paused ? 2 : 0) | (s.step ? 16 : 0) |
 					(s.realtime ? 4 : 0) | (s.process ? 8 : 0);
 	qstring extra = s.extra;
 
-	// IDA places fields by character position: the labels are padded to one
-	// length to line them up. The title is followed by two empty lines, and a
-	// ':' ends a label, so hints mustn't have one (see FORM_C in kernwin.hpp).
 	static const char form[] =
 		"REverb minihost settings\n"
 		"\n"
@@ -131,7 +129,9 @@ bool edit_settings() {
 		"Send ~n~otes:C>\n"
 		"<#Activated, but no blocks run until Play#Start ~p~aused:C>\n"
 		"<#Blocks paced like an audio device would#Real ~t~ime:C>\n"
-		"<#When off, the plugin is only created#Pr~o~cess audio:C>>\n"
+		"<#When off, the plugin is only created#Pr~o~cess audio:C>\n"
+		"<#Wait before each lifecycle phase for Next step#Step throug~h~ "
+		"phases:C>>\n"
 		"\n"
 		"<#Passed as typed, before the plugin path#"
 		"~E~xtra arguments     :q:1024:40::>\n";
@@ -161,6 +161,7 @@ bool edit_settings() {
 	s.paused = (checks & 2) != 0;
 	s.realtime = (checks & 4) != 0;
 	s.process = (checks & 8) != 0;
+	s.step = (checks & 16) != 0;
 	s.extra = extra;
 	s.extra.trim2();
 
@@ -180,7 +181,8 @@ struct settings_ah_t : public action_handler_t {
 	}
 };
 
-command_ah_t g_play("play"), g_pause("pause"), g_info("info"), g_quit("quit");
+command_ah_t g_next("next"), g_play("play"), g_pause("pause"), g_info("info"),
+	g_quit("quit");
 blocks_ah_t g_blocks;
 typed_ah_t g_typed;
 settings_ah_t g_settings;
@@ -197,12 +199,14 @@ struct control_t {
 };
 
 control_t g_controls[] = {
-	{ "reverb:mh_play", "Play", "Run blocks until paused", &g_play,
-		RV_MH_PLAY_SVG, true, true, -1 },
+	{ "reverb:mh_play", "Play", "Run blocks until paused; ends step mode",
+		&g_play, RV_MH_PLAY_SVG, true, true, -1 },
 	{ "reverb:mh_pause", "Pause", "Stop running blocks", &g_pause,
 		RV_MH_PAUSE_SVG, true, true, -1 },
 	{ "reverb:mh_blocks", "Run blocks...", "Run some blocks, then pause",
 		&g_blocks, RV_MH_BLOCKS_SVG, true, true, -1 },
+	{ "reverb:mh_next", "Next step", "Go on to the next lifecycle phase",
+		&g_next, RV_MH_STEP_SVG, true, true, -1 },
 	{ "reverb:mh_info", "Info", "Print the plugin and engine state", &g_info,
 		RV_MH_INFO_SVG, true, true, -1 },
 	{ "reverb:mh_quit", "Quit", "Unload the plugin and end the minihost",

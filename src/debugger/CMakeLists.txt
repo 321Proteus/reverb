@@ -8,7 +8,7 @@ target_sources(reverb PRIVATE
 )
 
 # The minihost control icons
-foreach(ICON IN ITEMS play pause blocks info quit settings)
+foreach(ICON IN ITEMS play pause blocks step info quit settings)
     string(TOUPPER "${ICON}" ICON_UPPER)
     rv_embed_header(
         ${CMAKE_SOURCE_DIR}/assets/minihost/${ICON}.svg

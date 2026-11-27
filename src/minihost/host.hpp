@@ -155,4 +155,19 @@ bool set_log_file(const char* path);
  */
 std::optional<Interface> parse_interface(const std::string& name);
 
+/** @brief Turns step mode on or off; off also releases a waiting step */
+void set_step_mode(bool on);
+
+/**
+ * @brief In step mode, waits for step_next() before @p phase; returns at once
+ * otherwise. Safe on any thread; the main thread's run loop keeps going.
+ */
+void step(const char* phase);
+
+/** @brief Releases the waiting step, false if none was waiting */
+bool step_next();
+
+/** @brief The phase a step waits for, or null */
+const char* step_waiting();
+
 } // namespace rv::host

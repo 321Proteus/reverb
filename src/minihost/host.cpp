@@ -3,6 +3,8 @@
 #include "host.hpp"
 #include "formats/host.hpp"
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -36,6 +38,61 @@ void rv_host_log(const char* fmt, ...) {
 }
 
 namespace rv::host {
+
+// Step mode
+
+static std::atomic<bool> g_stepping{ false };
+static std::mutex g_step_mutex;
+static std::condition_variable g_step_cv;
+static uint64_t g_step_released = 0; ///< Counts step_next() and mode changes
+static const char* g_step_phase = nullptr; ///< Waited before; null if none
+
+void set_step_mode(bool on) {
+	{
+		std::lock_guard<std::mutex> lock(g_step_mutex);
+		g_stepping = on;
+		g_step_released++;
+	}
+	g_step_cv.notify_all();
+}
+
+void step(const char* phase) {
+	if (!g_stepping) return;
+	rv_host_log(
+		"step: before %s ('next' to go on, 'run' to stop stepping)", phase);
+
+	std::unique_lock<std::mutex> lock(g_step_mutex);
+	const uint64_t seen = g_step_released;
+	g_step_phase = phase;
+	const bool main = on_main_thread();
+
+	while (g_step_released == seen) {
+		if (!main) {
+			g_step_cv.wait(lock);
+			continue;
+		}
+		// The main thread still services its run loop while it waits
+		lock.unlock();
+		pump_main_thread(10);
+		lock.lock();
+	}
+	g_step_phase = nullptr;
+}
+
+const char* step_waiting() {
+	std::lock_guard<std::mutex> lock(g_step_mutex);
+	return g_step_phase;
+}
+
+bool step_next() {
+	{
+		std::lock_guard<std::mutex> lock(g_step_mutex);
+		if (g_step_phase == nullptr) return false;
+		g_step_released++;
+	}
+	g_step_cv.notify_all();
+	return true;
+}
 
 bool connect_channel(const std::string& address,
 	std::function<void(const std::string&)> on_line) {

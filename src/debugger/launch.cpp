@@ -128,7 +128,8 @@ enum : nodeidx_t {
 	FLAG_NOTES = 1,
 	FLAG_PAUSED = 2,
 	FLAG_FAST = 4,
-	FLAG_NO_PROCESS = 8
+	FLAG_NO_PROCESS = 8,
+	FLAG_STEP = 16
 };
 
 host_settings_t load_settings() {
@@ -146,6 +147,7 @@ host_settings_t load_settings() {
 	s.paused = (f & FLAG_PAUSED) != 0;
 	s.realtime = (f & FLAG_FAST) == 0;
 	s.process = (f & FLAG_NO_PROCESS) == 0;
+	s.step = (f & FLAG_STEP) != 0;
 	n.supstr(&s.signal, SET_SIGNAL);
 	n.supstr(&s.extra, SET_EXTRA);
 	return s;
@@ -159,7 +161,8 @@ void save_settings(const host_settings_t& s) {
 	n.altset(SET_BLOCK, nodeidx_t(s.block_size));
 	n.altset(SET_FLAGS,
 		(s.notes ? FLAG_NOTES : 0) | (s.paused ? FLAG_PAUSED : 0) |
-			(s.realtime ? 0 : FLAG_FAST) | (s.process ? 0 : FLAG_NO_PROCESS));
+			(s.realtime ? 0 : FLAG_FAST) | (s.process ? 0 : FLAG_NO_PROCESS) |
+			(s.step ? FLAG_STEP : 0));
 	n.supset(SET_SIGNAL, s.signal.c_str());
 	n.supset(SET_EXTRA, s.extra.c_str());
 	n.altset(SET_SAVED, 1);
@@ -189,6 +192,7 @@ static qstring settings_args(const host_settings_t& s, Interface format) {
 	if (s.signal != def.signal) a.cat_sprnt(" --signal %s", s.signal.c_str());
 	if (!s.notes) a += " --no-notes";
 	if (s.paused) a += " --paused";
+	if (s.step) a += " --step";
 	if (!s.realtime) a += " --fast";
 	if (!s.process) a += " --no-process";
 	if (!s.extra.empty()) a.cat_sprnt(" %s", s.extra.c_str());
