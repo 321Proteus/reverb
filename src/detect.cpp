@@ -1,23 +1,17 @@
 #include "detect.hpp"
 #include "core/reverb.hpp"
-#include <hexrays.hpp>
-#include <pro.h>
+#include <string>
 #include <vector>
-#include <typeinf.hpp>
-
-// Source: https://stackoverflow.com/questions/16388510
-static constexpr unsigned int str_cth(const char* str, int h = 0) {
-	return !str[h] ? 5381 : (str_cth(str, h + 1) * 33) ^ str[h];
-}
 
 static const char* lstrip(const char* s) { return (s[0] == '_') ? s + 1 : s; }
 
-rv::InterfaceSet classify_from_exports(const std::vector<qstring>& exports) {
+rv::InterfaceSet classify_from_exports(
+	const std::vector<std::string>& exports) {
 
 	rv::InterfaceSet found;
 
 	// clang-format off
-	for (const qstring& ex : exports) {
+	for (const std::string& ex : exports) {
 		switch (str_cth(lstrip(ex.c_str()))) {
 
 		case str_cth("VSTPluginMain"):

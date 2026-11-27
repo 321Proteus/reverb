@@ -127,7 +127,7 @@ static void run_scan(rv::InterfaceSet is) {
 
 /** @brief Classify the format(s) and framework + load types */
 static rv::InterfaceSet detect() {
-	std::vector<qstring> exports;
+	std::vector<std::string> exports;
 	int n = get_entry_qty();
 
 	for (int i = 0; i < n; i++) {
@@ -135,7 +135,7 @@ static rv::InterfaceSet detect() {
 		qstring name;
 
 		get_entry_name(&name, ord);
-		exports.push_back(name);
+		exports.push_back(name.c_str());
 	}
 
 	rv::InterfaceSet formats = classify_from_exports(exports);
