@@ -12,7 +12,7 @@
 
 static std::FILE* g_log_file = nullptr;
 static rv::net::sock_t g_channel = rv::net::BADSOCK;
-/// One line at a time from the main, audio and channel threads
+// One line at a time from the main, audio and channel threads
 static std::mutex g_log_mutex;
 
 void rv_host_log(const char* fmt, ...) {

@@ -82,7 +82,7 @@ struct VstMidiEvent {
 
 constexpr int kMaxEvents = 16;
 
-/// VstEvents with room for kMaxEvents (the SDK declares events[2])
+// VstEvents with room for kMaxEvents (the SDK declares events[2])
 struct VstEventsN {
 	VstInt32 numEvents;
 	VstIntPtr reserved;
@@ -141,13 +141,13 @@ const char* const kEntrySymbols[] = { "VSTPluginMain", "main_macho", "main",
 const char* const kHostCanDo[] = { "sendVstEvents", "sendVstMidiEvent",
 	"sendVstTimeInfo", "receiveVstEvents", "receiveVstMidiEvent", nullptr };
 
-/// Host state the callback answers from: one plugin per process
+// Host state the callback answers from: one plugin per process
 struct HostState {
 	host::ProcessSetup setup;
 	VstTimeInfo time = {};
 } g_state;
 
-/// Some opcodes come with every block: log each only its first few times
+// Some opcodes come with every block: log each only its first few times
 bool should_log(VstInt32 opcode) {
 	static std::atomic<int> counts[64];
 	if (opcode < 0 || opcode >= 64) return true;
@@ -318,7 +318,7 @@ private:
 		return effect_->dispatcher(effect_, op, index, value, ptr, opt);
 	}
 
-	/// The time info audioMasterGetTime returns while the block runs
+	// The time info audioMasterGetTime returns while the block runs
 	static void update_time(const host::Block& b) {
 		VstTimeInfo& t = g_state.time;
 		const double ppq = b.ppq();

@@ -14,6 +14,7 @@
 #endif
 
 #include "launch.hpp"
+#include "controls.hpp"
 #include "core/log.hpp"
 #include <dbg.hpp>
 #include <diskio.hpp>
@@ -21,6 +22,7 @@
 #include <kernwin.hpp>
 #include <loader.hpp>
 #include <nalt.hpp>
+#include <netnode.hpp>
 #include <pro.h>
 
 namespace rv::debug {
@@ -77,11 +79,11 @@ static bool is_minihost(const qstring& app) {
 	return qstrstr(qbasename(app.c_str()), "reverb-minihost") != nullptr;
 }
 
-/// The minihost's log file, when there is no channel; set by configure_minihost
+// The minihost's log file, when there is no channel; set by configure_minihost
 static qstring g_log_path;
 
-/// The channel: listening for the minihost all session, one connection at a
-/// time
+// The channel: listening for the minihost all session, one connection at a
+// time
 static net::sock_t g_listener = net::BADSOCK;
 static int g_port = 0;
 static net::sock_t g_client = net::BADSOCK;
@@ -108,14 +110,104 @@ static qstring lower(const char* s) {
 	return out;
 }
 
+// Settings, in the database
+
+static const char kSettingsNode[] = "$ reverb minihost";
+enum : nodeidx_t { // altvals; supstrs share the indices
+	SET_SAVED,	   // 1 once saved
+	SET_FORMAT,	   // the Interface + 1, 0 for the best detected
+	SET_CLASS,
+	SET_RATE,
+	SET_BLOCK,
+	SET_FLAGS,	// FLAG_*
+	SET_SIGNAL, // supstr
+	SET_EXTRA,	// supstr
+};
+
+enum : nodeidx_t {
+	FLAG_NOTES = 1,
+	FLAG_PAUSED = 2,
+	FLAG_FAST = 4,
+	FLAG_NO_PROCESS = 8
+};
+
+host_settings_t load_settings() {
+	host_settings_t s;
+	netnode n(kSettingsNode);
+	if (n == BADNODE || n.altval(SET_SAVED) != 1) return s;
+
+	s.format = int(n.altval(SET_FORMAT)) - 1;
+	s.class_index = int(n.altval(SET_CLASS));
+	s.sample_rate = int(n.altval(SET_RATE));
+	s.block_size = int(n.altval(SET_BLOCK));
+	const nodeidx_t f = n.altval(SET_FLAGS);
+
+	s.notes = (f & FLAG_NOTES) != 0;
+	s.paused = (f & FLAG_PAUSED) != 0;
+	s.realtime = (f & FLAG_FAST) == 0;
+	s.process = (f & FLAG_NO_PROCESS) == 0;
+	n.supstr(&s.signal, SET_SIGNAL);
+	n.supstr(&s.extra, SET_EXTRA);
+	return s;
+}
+
+void save_settings(const host_settings_t& s) {
+	netnode n(kSettingsNode, 0, true);
+	n.altset(SET_FORMAT, nodeidx_t(s.format + 1));
+	n.altset(SET_CLASS, nodeidx_t(s.class_index));
+	n.altset(SET_RATE, nodeidx_t(s.sample_rate));
+	n.altset(SET_BLOCK, nodeidx_t(s.block_size));
+	n.altset(SET_FLAGS,
+		(s.notes ? FLAG_NOTES : 0) | (s.paused ? FLAG_PAUSED : 0) |
+			(s.realtime ? 0 : FLAG_FAST) | (s.process ? 0 : FLAG_NO_PROCESS));
+	n.supset(SET_SIGNAL, s.signal.c_str());
+	n.supset(SET_EXTRA, s.extra.c_str());
+	n.altset(SET_SAVED, 1);
+}
+
+// What configure_minihost last saw
+static InterfaceSet g_formats;
+
+std::vector<Interface> hostable_formats() {
+	std::vector<Interface> out;
+	for (Interface i : kHostable)
+		if (g_formats.has(i)) out.push_back(i);
+	return out;
+}
+
+// The minihost's arguments for the settings, but the channel and the input
+static qstring settings_args(const host_settings_t& s, Interface format) {
+	const host_settings_t def;
+	qstring a;
+	a.sprnt("--format %s", lower(get_interface_name(format)).c_str());
+	if (s.class_index != def.class_index)
+		a.cat_sprnt(" --class %d", s.class_index);
+	if (s.sample_rate != def.sample_rate)
+		a.cat_sprnt(" --rate %d", s.sample_rate);
+	if (s.block_size != def.block_size)
+		a.cat_sprnt(" --block %d", s.block_size);
+	if (s.signal != def.signal) a.cat_sprnt(" --signal %s", s.signal.c_str());
+	if (!s.notes) a += " --no-notes";
+	if (s.paused) a += " --paused";
+	if (!s.realtime) a += " --fast";
+	if (!s.process) a += " --no-process";
+	if (!s.extra.empty()) a.cat_sprnt(" %s", s.extra.c_str());
+
+	return a;
+}
+
+bool reconfigure_minihost() { return configure_minihost(g_formats); }
+
 bool configure_minihost(InterfaceSet formats) {
-	const Interface* pick = nullptr;
-	for (const Interface& i : kHostable)
-		if (formats.has(i)) {
-			pick = &i;
-			break;
-		}
-	if (pick == nullptr) return false;
+	g_formats = formats;
+	const std::vector<Interface> hostable = hostable_formats();
+	if (hostable.empty()) return false;
+
+	// The format chosen in the settings, if detected, else the best one
+	const host_settings_t settings = load_settings();
+	Interface pick = hostable.front();
+	for (Interface i : hostable)
+		if (int(i) == settings.format) pick = i;
 
 	char input[QMAXPATH] = {};
 	if (get_input_file_path(input, sizeof(input)) <= 0) return false;
@@ -145,8 +237,7 @@ bool configure_minihost(InterfaceSet formats) {
 		if (!g_log_path.empty())
 			args.sprnt("--log \"%s\" ", g_log_path.c_str());
 	}
-	args.cat_sprnt(
-		"--format %s \"%s\"", lower(get_interface_name(*pick)).c_str(), input);
+	args.cat_sprnt("%s \"%s\"", settings_args(settings, pick).c_str(), input);
 
 	char sdir[QMAXPATH];
 	if (!qdirname(sdir, sizeof(sdir), input)) sdir[0] = '\0';
@@ -165,7 +256,7 @@ static qtimer_t g_timer = nullptr;
 static qoff64_t g_offset = 0;
 static qstring g_partial; ///< A line still being written to the file
 
-/// Prints the lines added to the log file since the last call
+// Prints the lines added to the log file since the last call
 static void drain_log() {
 	if (g_log_path.empty()) return;
 	FILE* fp = qfopen(g_log_path.c_str(), "rb");
@@ -201,13 +292,14 @@ static void close_client() {
 	g_inbuf.clear();
 }
 
-/// Accepts the minihost's connection, then prints what it sent
+// Accepts the minihost's connection, then prints what it sent
 static void drain_channel() {
 	if (g_client == net::BADSOCK) {
 		if (g_listener == net::BADSOCK) return;
 		g_client = net::accept_pending(g_listener);
 		if (g_client == net::BADSOCK) return;
 		rv_log("reverb-minihost connected");
+		refresh_controls();
 	}
 
 	char buf[4096];
@@ -220,6 +312,7 @@ static void drain_channel() {
 	if (n == net::CLOSED || n == net::ERROR) {
 		close_client();
 		rv_log("reverb-minihost disconnected");
+		refresh_controls();
 	}
 }
 
@@ -250,32 +343,6 @@ bool send_command(const char* command) {
 	close_client();
 	return false;
 }
-
-// A Debugger menu command to type a command in, until the panel has buttons
-
-static const char kCommandAction[] = "reverb:minihost_command";
-static const char kCommandMenu[] = "Debugger/";
-
-struct command_ah_t : public action_handler_t {
-	int idaapi activate(action_activation_ctx_t*) override {
-		static qstring last = "info";
-		qstring cmd = last;
-		if (!ask_str(&cmd, HIST_CMD,
-				"Minihost command (info, play, pause, blocks N, quit)"))
-			return 0;
-		cmd.trim2();
-		if (cmd.empty()) return 0;
-		last = cmd;
-		if (!send_command(cmd.c_str()))
-			rv_log("reverb-minihost is not connected");
-		return 0;
-	}
-
-	action_state_t idaapi update(action_update_ctx_t*) override {
-		return minihost_connected() ? AST_ENABLE : AST_DISABLE;
-	}
-};
-static command_ah_t g_command_ah;
 
 static ssize_t idaapi dbg_cb(void*, int code, va_list) {
 	if (code == dbg_process_start) {
@@ -308,18 +375,11 @@ void init() {
 	}
 
 	hook_to_notification_point(HT_DBG, dbg_cb);
-
-	const action_desc_t desc = ACTION_DESC_LITERAL_OWNER(kCommandAction,
-		"REverb minihost command...", &g_command_ah, &PLUGIN, nullptr,
-		"Send a command to reverb-minihost", -1, ADF_OT_PLUGIN);
-	if (register_action(desc))
-		attach_action_to_menu(kCommandMenu, kCommandAction, SETMENU_APP);
+	init_controls();
 }
 
 void term() {
-	detach_action_from_menu(kCommandMenu, kCommandAction);
-	unregister_action(kCommandAction);
-
+	term_controls();
 	stop_following();
 	unhook_from_notification_point(HT_DBG, dbg_cb);
 

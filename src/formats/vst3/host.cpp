@@ -261,7 +261,7 @@ constexpr tresult kNoInterface = (tresult)0x80004002;
 constexpr tresult kNoInterface = -1;
 #endif
 
-/// DECLARE_CLASS_IID words as TUID bytes, laid out like INLINE_UID
+// DECLARE_CLASS_IID words as TUID bytes, laid out like INLINE_UID
 struct Iid {
 	char b[16];
 	constexpr Iid(uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4) : b{} {
@@ -318,7 +318,7 @@ IHostApplication_vtbl g_host_vtbl = { host_qi, host_ref, host_ref,
 	host_get_name, host_create_instance };
 IHostApplication g_host_app = { &g_host_vtbl };
 
-/// The input IEventList: the block's notes, owned by the host
+// The input IEventList: the block's notes, owned by the host
 struct HostEventList {
 	IEventList base;
 	Event events[16];
@@ -590,7 +590,7 @@ private:
 		host::Channels ch;
 	};
 
-	/// Buffers for every audio bus in @p dir, activating the main one
+	// Buffers for every audio bus in @p dir, activating the main one
 	std::vector<Bus> buses(BusDirection dir, uint32 frames) {
 		IComponent_vtbl* cv = component_->__vftable;
 		const int32 n = cv->getBusCount(component_, kAudio, dir);
