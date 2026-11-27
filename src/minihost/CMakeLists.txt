@@ -16,6 +16,10 @@ target_include_directories(reverb-minihost PRIVATE
 find_package(Threads REQUIRED)
 target_link_libraries(reverb-minihost PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
+if (WIN32)
+    target_link_libraries(reverb-minihost PRIVATE ws2_32) # src/core/net.hpp
+endif()
+
 if (APPLE)
     # CFBundle (bundleEntry) and the main run loop JUCE plugins rely on
     target_link_libraries(reverb-minihost PRIVATE "-framework CoreFoundation")
