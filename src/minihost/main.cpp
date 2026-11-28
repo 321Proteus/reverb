@@ -285,9 +285,7 @@ int main(int argc, char** argv) {
 		engine->describe();
 
 	} else if (!once) {
-		rv_host_log(
-			"plugin is alive, attach a debugger to pid %d ('info', 'quit')",
-			(int)getpid());
+		rv_host_log("plugin is alive (pid %d): 'info', 'quit'", (int)getpid());
 
 		while (!g_quit) {
 			host->idle();

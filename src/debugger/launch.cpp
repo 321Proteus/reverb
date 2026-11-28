@@ -362,19 +362,25 @@ static void print_start_hint() {
 		app.c_str(), windows ? "" : " (chmod +x)");
 
 	// The plugin path is the last argument, in quotes
-	const size_t close = args.rfind('"');
-	const size_t open = close == 0 || close == qstring::npos
-							? qstring::npos
-							: args.rfind('"', close - 1);
-	if (open != qstring::npos) {
+	size_t close = args.length();
+	while (close > 0 && args[close - 1] != '"')
+		close--;
+	size_t open = close > 0 ? close - 1 : 0;
+	while (open > 0 && args[open - 1] != '"')
+		open--;
+	if (close > 1 && open > 0) {
+		open--;
+		close--;
 		const qstring plugin = bundle_of(args.substr(open + 1, close));
 		rv_log("  - %s is at %s", base_name(plugin).c_str(),
 			dir_name(plugin).c_str());
 	}
+
 	if (remote)
 		rv_log("  - %s runs there, and IDA may reach it (%s -v logs each "
 			   "request)",
 			debug_server_name(), debug_server_name());
+
 	if (app != g_set.app || args != g_set.args || sdir != g_set.sdir)
 		rv_log("  - the Process options were edited since REverb set them: "
 			   "paths go in Debugger > REverb minihost > Settings, and "
@@ -401,14 +407,21 @@ static void end_start_watch() {
 	g_start_timer = nullptr;
 }
 
-// A second later: the process start notification had time to arrive
+// A remote start goes on in the background after the action: it has
+// failed when no process came in that time
+static constexpr int kStartTicks = 30; ///< Of 500 ms
+static int g_start_ticks = 0;
+
 static int idaapi start_timer_cb(void*) {
-	g_start_timer = nullptr; // -1 below unregisters it
-	if (g_start_watched && !g_start_seen &&
-		get_process_state() == DSTATE_NOTASK)
-		print_start_hint();
-	g_start_watched = false;
-	return -1;
+	const bool started = g_start_seen || get_process_state() != DSTATE_NOTASK;
+	if (!g_start_watched || started || ++g_start_ticks >= kStartTicks) {
+		if (g_start_watched && !started && !is_debugger_busy())
+			print_start_hint();
+		g_start_watched = false;
+		g_start_timer = nullptr; // -1 unregisters it
+		return -1;
+	}
+	return 500;
 }
 
 // The pre event names the action, the post one (for the same action) doesn't
@@ -428,8 +441,10 @@ static void on_action(bool pre, const char* name) {
 	} else if (g_start_watched && g_start_timer == nullptr) {
 		if (g_start_seen || get_process_state() != DSTATE_NOTASK)
 			end_start_watch();
-		else
-			g_start_timer = register_timer(1000, start_timer_cb, nullptr);
+		else {
+			g_start_ticks = 0;
+			g_start_timer = register_timer(500, start_timer_cb, nullptr);
+		}
 	}
 }
 
