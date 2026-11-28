@@ -297,6 +297,24 @@ static qstring settings_args(const host_settings_t& s, Interface format) {
 
 bool reconfigure_minihost() { return configure_minihost(g_formats); }
 
+/**
+ * @brief Sets the process options to run @p app, unless they already do:
+ * setting them while IDA starts the process makes the start fail
+ *
+ * @return false if they were already set so
+ */
+static bool apply_options(
+	const qstring& app, const qstring& args, const qstring& sdir) {
+	qstring cur_app, cur_args, cur_sdir;
+	get_process_options(
+		&cur_app, &cur_args, nullptr, &cur_sdir, nullptr, nullptr, nullptr);
+	if (cur_app == app && cur_args == args && cur_sdir == sdir) return false;
+
+	set_process_options(app.c_str(), args.c_str(), nullptr, sdir.c_str(),
+		nullptr, nullptr, -1);
+	return true;
+}
+
 bool configure_minihost(InterfaceSet formats) {
 	g_formats = formats;
 	const std::vector<Interface> hostable = hostable_formats();
@@ -336,10 +354,9 @@ bool configure_minihost(InterfaceSet formats) {
 			remote_plugin.c_str());
 		const qstring sdir = dir_name(remote_plugin);
 
-		set_process_options(host.c_str(), args.c_str(), nullptr, sdir.c_str(),
-			nullptr, nullptr, -1);
-		rv_log("Debugger set to run %s %s on %s", host.c_str(), args.c_str(),
-			target.c_str());
+		if (apply_options(host, args, sdir))
+			rv_log("Debugger set to run %s %s on %s", host.c_str(),
+				args.c_str(), target.c_str());
 		return true;
 	}
 
@@ -365,9 +382,8 @@ bool configure_minihost(InterfaceSet formats) {
 	char sdir[QMAXPATH];
 	if (!qdirname(sdir, sizeof(sdir), input)) sdir[0] = '\0';
 
-	set_process_options(
-		host.c_str(), args.c_str(), nullptr, sdir, nullptr, nullptr, -1);
-	rv_log("Debugger set to run %s %s", host.c_str(), args.c_str());
+	if (apply_options(host, args, sdir))
+		rv_log("Debugger set to run %s %s", host.c_str(), args.c_str());
 	return true;
 }
 
@@ -541,10 +557,14 @@ static bool start_remote_run(const qstring& args) {
 	return true;
 }
 
-// Another debugger may be remote, or not: the options follow it
+// Another debugger may be remote, or not: the options follow it. The event
+// also comes while IDA starts a process, when they must stay as they are.
 static ssize_t idaapi ui_cb(void*, int code, va_list va) {
-	if (code == ui_debugger_menu_change && va_arg(va, int) != 0)
-		reconfigure_minihost();
+	if (code != ui_debugger_menu_change || va_arg(va, int) == 0) return 0;
+	static const debugger_t* last = nullptr;
+	if (dbg == last || get_process_state() != DSTATE_NOTASK) return 0;
+	last = dbg;
+	reconfigure_minihost();
 	return 0;
 }
 
