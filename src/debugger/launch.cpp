@@ -415,6 +415,9 @@ static int idaapi start_timer_cb(void*) {
 static void on_action(bool pre, const char* name) {
 	if (pre) {
 		if (name == nullptr || !streq(name, "ProcessStart")) return;
+
+		if (get_process_state() == DSTATE_NOTASK) reconfigure_minihost();
+
 		qstring app;
 		get_process_options(
 			&app, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
