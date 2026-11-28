@@ -6,7 +6,7 @@
     "entryPoint": "reverb",
     "description": "REverb is a Work-In-Progress virtual instrument reverse engineering and debugging toolkit.\nDetection, metadata extraction and host service for VST, VST3, AAX and CLAP plugins",
     "license": "GPL-3.0",
-    "idaVersions": ["9.2", "9.3", "9.4"],
+    "idaVersions": ["9.2", "9.3", "9.4", "9.5"],
     "logoPath": "assets/logo.svg",
     "categories": [
       "file-parsers-and-loaders",
