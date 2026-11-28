@@ -12,6 +12,7 @@ Audio plugins are shared objects, mostly written in C and C++ (although Rust and
  - **Object labeling** Entry points, factory objects, vtables, plugin descriptors, you name it.
  - **Plugin framework identification** from strings and RTTI signatures for JUCE, DPF and iPlug2
  - **Type declarations** from the official SDKs and the JUCE plugin framework
+ - **Debugging host** `reverb-minihost` runs the plugin under IDA's debugger, locally or remotely, with breakpoints set on the interesting functions
 
 ## Requirements
 
@@ -28,6 +29,30 @@ tar -xJf reverb-tils-<date>.tar.xz -C ~/.idapro/til
 ```
 
 Without them REverb works as before and logs that they are not installed. The library is picked by the detected version: the newest one that is not newer than it (a newer JUCE gets the newest library, with a warning)
+
+## Debugging with reverb-minihost
+
+`reverb-minihost` is a minimal host that ships with the plugin. It currently supports all formats that are supported by REverb itself. REverb points IDA's debugger at it with the detection results, so pressing F9 loads the plugin and takes it through its lifecycle: entry point, instance creation, initialization, activation and processing. There is no audio device (Yet!): the plugin processes a test signal and gets a MIDI note every second, so instruments make sound too.
+
+After the initial scan, REverb adds breakpoints on the functions of the detected format and framework, in groups under `/REverb/<name>`. The lifecycle ones start enabled, the per-block ones disabled.
+
+The minihost's log shows up in IDA's Output window. The **Debugger > REverb minihost** menu and its toolbar control it while it runs:
+
+| Control | What it does |
+|---------|--------------|
+| Play / Pause | Runs blocks until paused, or stops running them |
+| Run blocks... | Runs a number of blocks, then pauses |
+| Next step | With *Step through phases* on, goes on to the next lifecycle phase, so you can set breakpoints between them |
+| Info | Prints the plugin and engine state |
+| List parameters | Prints the plugin's parameters |
+| Send command... | Sends any command below |
+| Settings... | What the minihost is started with: the format, sample rate, block size, signal, a state to load, and the remote paths |
+
+Commands: `info`, `play`, `pause`, `blocks N`, `next`, `run` (ends step mode), `params [part of a name]`, `set <index|#id|name> <0..1>`, `save FILE` and `load FILE` for the plugin's state blob, and `quit`. The same commands work on the minihost's standard input when it runs in a terminal (`reverb-minihost-<os> --help` lists its options).
+
+### Remote debugging
+
+To debug a plugin on another machine, such as a Linux or Windows plugin from a Mac, run IDA's debug server there (`linux_server`, `win64_remote.exe` or `mac_server` from IDA's `dbgsrv` directory) and copy over the plugin and the minihost for that OS: `reverb-minihost-linux`, `reverb-minihost.exe` or `reverb-minihost-macos`. In IDA, select the remote debugger and set its host in *Debugger > Process options*, then fill in the paths on the target in the minihost settings. On the target, the minihost listens on the channel port (23950 by default) and IDA connects to it, so the target's firewall has to let that port in.
 
 ## Development and building from source
 
@@ -51,7 +76,9 @@ cmake --build build --config Release
 On Windows, add `-A x64` to the configure step (Visual Studio generators).
 
 The resulting `reverb.dll/so/dylib` is placed by the SDK's CMake
-layout (look under `build/` and `$IDASDK/bin`). Copy it to your plugins directory.
+layout in `$IDABIN/plugins` (pass `-DIDABIN=$HOME/.idapro` or set the `IDABIN` environment variable to build straight into your user directory, without either it is `$IDASDK/bin`). Copy it to your plugins directory otherwise.
+
+`reverb-minihost` is built next to it, named for its OS (`reverb-minihost-linux`, `reverb-minihost-macos` or `reverb-minihost.exe`), so that the release can ship all of them in one directory. Pass `-DRV_BUILD_MINIHOST=OFF` to build the plugin alone.
 
 The CI workflow in [`.github/workflows/build.yml`](.github/workflows/build.yml) is a
 complete, working example of the steps above for every platform.
@@ -72,8 +99,7 @@ my plugin library. It also requires a licensed IDA and therefore is not ran by C
 
 ## To Do (planned):
  - Figure out how to do type declarations for other frameworks, like DPF and iPlug2 - they don't have typical release cycles, just a steady stream of commits
- - Create a minimal plugin host that uses format and framework detection results to automatically set breakpoints
- at interesting functions and integrate it with the IDA debug ecosystem
+  - Implement per-platform GUI and audio support for the minihost
  - Recursively taint functions accessing pointers to audio signal data provided by the host (e.g. `process()` in VST3),
  labeling them for example `sub_dsp_01234`
  - Add support for more plugin formats like AAX, AU and LV2
