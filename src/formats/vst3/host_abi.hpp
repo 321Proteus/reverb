@@ -219,7 +219,7 @@ struct ProcessData {
 	int32 numOutputs;
 	AudioBusBuffers* inputs;
 	AudioBusBuffers* outputs;
-	void* inputParameterChanges; // IParameterChanges
+	void* inputParameterChanges;  // IParameterChanges
 	void* outputParameterChanges; // none: what the plugin reports is dropped
 	IEventList* inputEvents;
 	IEventList* outputEvents;
@@ -346,8 +346,8 @@ struct IParamValueQueue_vtbl {
 	int32(RV_PLUGIN_API* getPointCount)(IParamValueQueue* self);
 	tresult(RV_PLUGIN_API* getPoint)(IParamValueQueue* self, int32 index,
 		int32* sampleOffset, ParamValue* value);
-	tresult(RV_PLUGIN_API* addPoint)(IParamValueQueue* self,
-		int32 sampleOffset, ParamValue value, int32* index);
+	tresult(RV_PLUGIN_API* addPoint)(IParamValueQueue* self, int32 sampleOffset,
+		ParamValue value, int32* index);
 };
 struct IParamValueQueue {
 	IParamValueQueue_vtbl* __vftable;
