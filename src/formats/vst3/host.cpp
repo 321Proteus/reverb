@@ -255,6 +255,7 @@ struct IAudioProcessor {
 
 constexpr tresult kResultOk = 0;
 constexpr tresult kResultFalse = 1;
+constexpr tresult kNotImplemented = 3;
 #ifdef _WIN32 // E_NOINTERFACE
 constexpr tresult kNoInterface = (tresult)0x80004002;
 #else
@@ -479,6 +480,8 @@ public:
 		outs_ = buses(kOutput, s.block_size);
 		events_in_ = cv->getBusCount(component_, kEvent, kInput) > 0;
 		if (events_in_) cv->activateBus(component_, kEvent, kInput, 0, 1);
+		rv_host_log("  event input bus: %s",
+			events_in_ ? "yes (notes are sent)" : "none (no notes)");
 
 		ProcessSetup ps = { 0, 0, int32(s.block_size), s.sample_rate };
 		tresult r = pv->setupProcessing(processor_, &ps);
@@ -496,7 +499,8 @@ public:
 	bool start_processing() override {
 		// kNotImplemented is fine: setProcessing is optional for the plugin
 		const tresult r = processor_->__vftable->setProcessing(processor_, 1);
-		rv_host_log("setProcessing(true) -> %d", r);
+		rv_host_log("setProcessing(true) -> %d%s", r,
+			r == kNotImplemented ? " (kNotImplemented: optional, fine)" : "");
 		return true;
 	}
 
