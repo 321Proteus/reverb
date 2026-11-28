@@ -194,7 +194,9 @@ static qstring settings_args(const host_settings_t& s, Interface format) {
 	return a;
 }
 
-bool reconfigure_minihost() { return configure_minihost(g_formats); }
+bool reconfigure_minihost(bool keep) {
+	return configure_minihost(g_formats, keep);
+}
 
 // The process options configure_minihost last chose, to tell when they were
 // edited by hand since
@@ -219,13 +221,13 @@ static bool apply_options(
 		app.c_str(), args.c_str(), nullptr, sdir.c_str(), nullptr, nullptr, -1);
 	return true;
 }
-bool configure_minihost(InterfaceSet formats) {
+bool configure_minihost(InterfaceSet formats, bool keep_typed) {
 	g_formats = formats;
 	const std::vector<Interface> hostable = hostable_formats();
 	if (hostable.empty()) return false;
 
 	// The format chosen in the settings, if detected, else the best one
-	const host_settings_t settings = load_settings();
+	host_settings_t settings = load_settings();
 	Interface pick = hostable.front();
 	for (Interface i : hostable)
 		if (int(i) == settings.format) pick = i;
@@ -247,6 +249,18 @@ bool configure_minihost(InterfaceSet formats) {
 
 	qstring target;
 	if (remote_target(&target)) {
+
+		if (keep_typed && is_minihost(app) && !g_set.app.empty() &&
+			app != g_set.app && app != settings.remote_minihost) {
+
+			settings.remote_minihost = app;
+			save_settings(settings);
+
+			rv_log("Keeping the minihost path typed in Process options: %s "
+				   "(now the remote Minihost path in the settings)",
+				app.c_str());
+		}
+
 		// Everything is the target's: the paths, and the channel's end
 		const qstring host = settings.remote_minihost.empty()
 								 ? default_remote_minihost(remote_plugin)
@@ -429,7 +443,7 @@ static void on_action(bool pre, const char* name) {
 	if (pre) {
 		if (name == nullptr || !streq(name, "ProcessStart")) return;
 
-		if (get_process_state() == DSTATE_NOTASK) reconfigure_minihost();
+		if (get_process_state() == DSTATE_NOTASK) reconfigure_minihost(true);
 
 		qstring app;
 		get_process_options(
@@ -460,7 +474,7 @@ static ssize_t idaapi ui_cb(void*, int code, va_list va) {
 	static const debugger_t* last = nullptr;
 	if (dbg == last || get_process_state() != DSTATE_NOTASK) return 0;
 	last = dbg;
-	reconfigure_minihost();
+	reconfigure_minihost(true);
 	return 0;
 }
 
