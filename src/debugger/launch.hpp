@@ -33,52 +33,11 @@ bool reconfigure_minihost();
 std::vector<Interface> hostable_formats();
 
 /**
- * @brief What the minihost is launched with; kept in the database
- *
- * The defaults are the minihost's own: only the settings that differ are
- * passed.
- */
-struct host_settings_t {
-	int format = -1; ///< An Interface, or -1 for the best detected one
-	int class_index = 0;
-	int sample_rate = 48000;
-	int block_size = 512;
-	qstring signal = "sine"; ///< sine, impulse, noise or silence
-	bool notes = true;
-	bool paused = false;
-	bool step = false; ///< Wait before each lifecycle phase for Next step
-	bool realtime = true;
-	bool process = true;
-	qstring extra; ///< Appended to the arguments as typed
-
-	// With a remote debugger: the target's paths, and the minihost's port
-	qstring remote_minihost; ///< Empty: next to the plugin's bundle
-	qstring remote_plugin;	 ///< Empty: the input file's path
-	int remote_port = 23950;
-};
-
-/** @brief The settings of this database, or the defaults */
-host_settings_t load_settings();
-
-/** @brief Stores @p s in the database */
-void save_settings(const host_settings_t& s);
-
-/**
  * @brief Listens for the minihost and hooks the debugger events: while a
- * minihost configured here runs, its log is shown in the Output window
+ * minihost configured here runs, its log is shown in the Output window (see
+ * channel.hpp)
  */
 void init();
-
-/** @brief True while a minihost is connected */
-bool minihost_connected();
-
-/**
- * @brief Sends @p command to the minihost
- *
- * @param command the command to send (e.g. info, play, blocks N, quit)
- * @return false if none is connected
- */
-bool send_command(const char* command);
 
 /** @brief Undoes init() */
 void term();

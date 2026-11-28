@@ -1,16 +1,15 @@
 /**
  * @file launch.cpp
- * @brief Runs reverb-minihost under the debugger, and talks to it over a
- * loopback TCP channel (src/core/net.hpp): its log comes up into the Output
- * window, commands go down. When the plugin can't listen, the minihost writes
- * its log to a file that is followed instead.
+ * @brief Runs reverb-minihost under the debugger: sets the process options
+ * for the local or the remote target, follows the run over the channel
+ * (channel.cpp), and says why when the minihost didn't start
  *
  * With a remote debugger, the minihost runs on the target and listens there
  * instead (--listen): the plugin connects to it at the debugger's host, as
  * it reaches the debug server there already.
  */
-// net.hpp first: winsock2.h must come before windows.h
-#include "core/net.hpp"
+// channel.hpp first: winsock2.h must come before windows.h
+#include "channel.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -20,16 +19,14 @@
 #include "controls.hpp"
 #include "core/log.hpp"
 #include "launch.hpp"
+#include "settings.hpp"
 #include <dbg.hpp>
 #include <diskio.hpp>
-#include <fpro.h>
 #include <ida.hpp>
 #include <kernwin.hpp>
 #include <loader.hpp>
 #include <nalt.hpp>
-#include <netnode.hpp>
 #include <pro.h>
-#include <random>
 
 namespace rv::debug {
 
@@ -103,17 +100,22 @@ static bool is_minihost(const qstring& app) {
 	return base_name(app).find("reverb-minihost") != qstring::npos;
 }
 
+/** @brief The bundle (X.vst3, X.clap) @p path is inside, or @p path itself */
+static qstring bundle_of(const qstring& path) {
+	qstring outer = path;
+	for (const char* inner : { "/Contents/", "\\Contents\\" }) {
+		const size_t at = outer.find(inner);
+		if (at != qstring::npos) outer.resize(at);
+	}
+	return outer;
+}
+
 /**
  * @brief Where the minihost goes on the target by default: next to the
  * plugin's bundle, or next to the module when it has none
  */
 static qstring default_remote_minihost(const qstring& plugin) {
-	qstring outer = plugin;
-	for (const char* inner : { "/Contents/", "\\Contents\\" }) {
-		const size_t at = outer.find(inner);
-		if (at != qstring::npos) outer.resize(at); // the bundle
-	}
-	qstring dir = dir_name(outer);
+	qstring dir = dir_name(bundle_of(plugin));
 	const char sep =
 		last_sep(plugin) != qstring::npos && plugin[last_sep(plugin)] == '\\'
 			? '\\'
@@ -124,23 +126,6 @@ static qstring default_remote_minihost(const qstring& plugin) {
 	if (inf_get_filetype() == f_PE) out += ".exe";
 	return out;
 }
-
-// The minihost's log file, when there is no channel; set by configure_minihost
-static qstring g_log_path;
-
-// The channel: listening for the minihost all session, one connection at a
-// time
-static net::sock_t g_listener = net::BADSOCK;
-static int g_port = 0;
-static net::sock_t g_client = net::BADSOCK;
-static std::string g_inbuf; ///< Received, a line still incomplete
-
-// A remote run: the minihost listens on the target, and the plugin connects
-static bool g_remote_run = false;
-static sockaddr_in g_remote_addr = {};
-static net::sock_t g_pending = net::BADSOCK; ///< Connecting, not yet done
-static int g_pending_ticks = 0;
-static constexpr int kConnectTicks = 15; ///< Timer ticks before a retry
 
 /**
  * @brief The log file of the minihost for this database: in the temp dir,
@@ -161,92 +146,6 @@ static qstring lower(const char* s) {
 	for (size_t i = 0; i < out.length(); i++)
 		out[i] = qtolower(out[i]);
 	return out;
-}
-
-// Settings, in the database
-
-static const char kSettingsNode[] = "$ reverb minihost";
-enum : nodeidx_t { // altvals; supstrs share the indices
-	SET_SAVED,	   // 1 once saved
-	SET_FORMAT,	   // the Interface + 1, 0 for the best detected
-	SET_CLASS,
-	SET_RATE,
-	SET_BLOCK,
-	SET_FLAGS,			 // FLAG_*
-	SET_SIGNAL,			 // supstr
-	SET_EXTRA,			 // supstr
-	SET_REMOTE_MINIHOST, // supstr
-	SET_REMOTE_PLUGIN,	 // supstr
-	SET_REMOTE_PORT,
-	SET_TOKEN, // supstr, made once per database
-};
-
-enum : nodeidx_t {
-	FLAG_NOTES = 1,
-	FLAG_PAUSED = 2,
-	FLAG_FAST = 4,
-	FLAG_NO_PROCESS = 8,
-	FLAG_STEP = 16
-};
-
-host_settings_t load_settings() {
-	host_settings_t s;
-	netnode n(kSettingsNode);
-	if (n == BADNODE || n.altval(SET_SAVED) != 1) return s;
-
-	s.format = int(n.altval(SET_FORMAT)) - 1;
-	s.class_index = int(n.altval(SET_CLASS));
-	s.sample_rate = int(n.altval(SET_RATE));
-	s.block_size = int(n.altval(SET_BLOCK));
-	const nodeidx_t f = n.altval(SET_FLAGS);
-
-	s.notes = (f & FLAG_NOTES) != 0;
-	s.paused = (f & FLAG_PAUSED) != 0;
-	s.realtime = (f & FLAG_FAST) == 0;
-	s.process = (f & FLAG_NO_PROCESS) == 0;
-	s.step = (f & FLAG_STEP) != 0;
-	n.supstr(&s.signal, SET_SIGNAL);
-	n.supstr(&s.extra, SET_EXTRA);
-	n.supstr(&s.remote_minihost, SET_REMOTE_MINIHOST);
-	n.supstr(&s.remote_plugin, SET_REMOTE_PLUGIN);
-	if (const nodeidx_t port = n.altval(SET_REMOTE_PORT)) // 0 before it existed
-		s.remote_port = int(port);
-	return s;
-}
-
-void save_settings(const host_settings_t& s) {
-	netnode n(kSettingsNode, 0, true);
-	n.altset(SET_FORMAT, nodeidx_t(s.format + 1));
-	n.altset(SET_CLASS, nodeidx_t(s.class_index));
-	n.altset(SET_RATE, nodeidx_t(s.sample_rate));
-	n.altset(SET_BLOCK, nodeidx_t(s.block_size));
-	n.altset(SET_FLAGS,
-		(s.notes ? FLAG_NOTES : 0) | (s.paused ? FLAG_PAUSED : 0) |
-			(s.realtime ? 0 : FLAG_FAST) | (s.process ? 0 : FLAG_NO_PROCESS) |
-			(s.step ? FLAG_STEP : 0));
-	n.supset(SET_SIGNAL, s.signal.c_str());
-	n.supset(SET_EXTRA, s.extra.c_str());
-	n.supset(SET_REMOTE_MINIHOST, s.remote_minihost.c_str());
-	n.supset(SET_REMOTE_PLUGIN, s.remote_plugin.c_str());
-	n.altset(SET_REMOTE_PORT, nodeidx_t(s.remote_port));
-	n.altset(SET_SAVED, 1);
-}
-
-/**
- * @brief What the plugin says first when it connects to a remote minihost,
- * so that no one else on the target's network drives it. Made once and kept
- * in the database, as the process options that carry it are.
- */
-static qstring channel_token() {
-	netnode n(kSettingsNode, 0, true);
-	qstring token;
-	if (n.supstr(&token, SET_TOKEN) > 0 && !token.empty()) return token;
-
-	std::random_device rd;
-	for (int i = 0; i < 4; i++)
-		token.cat_sprnt("%08x", unsigned(rd()));
-	n.supset(SET_TOKEN, token.c_str());
-	return token;
 }
 
 /**
@@ -297,6 +196,12 @@ static qstring settings_args(const host_settings_t& s, Interface format) {
 
 bool reconfigure_minihost() { return configure_minihost(g_formats); }
 
+// The process options configure_minihost last chose, to tell when they were
+// edited by hand since
+static struct {
+	qstring app, args, sdir;
+} g_set;
+
 /**
  * @brief Sets the process options to run @p app, unless they already do:
  * setting them while IDA starts the process makes the start fail
@@ -310,11 +215,10 @@ static bool apply_options(
 		&cur_app, &cur_args, nullptr, &cur_sdir, nullptr, nullptr, nullptr);
 	if (cur_app == app && cur_args == args && cur_sdir == sdir) return false;
 
-	set_process_options(app.c_str(), args.c_str(), nullptr, sdir.c_str(),
-		nullptr, nullptr, -1);
+	set_process_options(
+		app.c_str(), args.c_str(), nullptr, sdir.c_str(), nullptr, nullptr, -1);
 	return true;
 }
-
 bool configure_minihost(InterfaceSet formats) {
 	g_formats = formats;
 	const std::vector<Interface> hostable = hostable_formats();
@@ -347,16 +251,23 @@ bool configure_minihost(InterfaceSet formats) {
 		const qstring host = settings.remote_minihost.empty()
 								 ? default_remote_minihost(remote_plugin)
 								 : settings.remote_minihost;
-		g_log_path.clear();
+		set_log_file(qstring());
 		qstring args;
 		args.sprnt("--listen %d --token %s %s \"%s\"", settings.remote_port,
 			channel_token().c_str(), settings_args(settings, pick).c_str(),
 			remote_plugin.c_str());
 		const qstring sdir = dir_name(remote_plugin);
 
-		if (apply_options(host, args, sdir))
+		if (apply_options(host, args, sdir)) {
+			const qstring plugin = bundle_of(remote_plugin);
 			rv_log("Debugger set to run %s %s on %s", host.c_str(),
 				args.c_str(), target.c_str());
+			rv_log("The target requires the reverb-minihost executable at %s "
+				   "and %s at %s",
+				host.c_str(), base_name(plugin).c_str(),
+				dir_name(plugin).c_str());
+		}
+		g_set = { host, args, sdir };
 		return true;
 	}
 
@@ -369,14 +280,14 @@ bool configure_minihost(InterfaceSet formats) {
 
 	// The channel, or the log file when the plugin couldn't listen
 	qstring args;
-	g_log_path.clear();
-	if (g_port > 0) {
-		args.sprnt("--connect 127.0.0.1:%d ", g_port);
+	qstring log_path;
+	if (channel_port() > 0) {
+		args.sprnt("--connect 127.0.0.1:%d ", channel_port());
 	} else {
-		g_log_path = make_log_path(input);
-		if (!g_log_path.empty())
-			args.sprnt("--log \"%s\" ", g_log_path.c_str());
+		log_path = make_log_path(input);
+		if (!log_path.empty()) args.sprnt("--log \"%s\" ", log_path.c_str());
 	}
+	set_log_file(log_path);
 	args.cat_sprnt("%s \"%s\"", settings_args(settings, pick).c_str(), input);
 
 	char sdir[QMAXPATH];
@@ -384,150 +295,13 @@ bool configure_minihost(InterfaceSet formats) {
 
 	if (apply_options(host, args, sdir))
 		rv_log("Debugger set to run %s %s", host.c_str(), args.c_str());
+	g_set = { host, args, sdir };
 	return true;
-}
-
-// Following the minihost: the debuggee's stdout goes to the terminal IDA was
-// started from, if any, so the minihost sends its log over the channel, or
-// writes it to a file
-
-static qtimer_t g_timer = nullptr;
-static qoff64_t g_offset = 0;
-static qstring g_partial; ///< A line still being written to the file
-
-// Prints the lines added to the log file since the last call
-static void drain_log() {
-	if (g_log_path.empty()) return;
-	FILE* fp = qfopen(g_log_path.c_str(), "rb");
-	if (fp == nullptr) return; // not created yet
-
-	qfseek(fp, 0, SEEK_END);
-	const qoff64_t size = qftell(fp);
-	if (size < g_offset) { // truncated: a new run
-		g_offset = 0;
-		g_partial.clear();
-	}
-	qfseek(fp, g_offset, SEEK_SET);
-
-	char buf[4096];
-	ssize_t n;
-	while ((n = qfread(fp, buf, sizeof(buf))) > 0) {
-		g_offset += n;
-		g_partial.append(buf, n);
-	}
-	qfclose(fp);
-
-	for (size_t nl; (nl = g_partial.find('\n')) != qstring::npos;) {
-		msg("%s\n", g_partial.substr(0, nl).c_str());
-		g_partial.remove(0, nl + 1);
-	}
-}
-
-static void close_client() {
-	if (g_client == net::BADSOCK) return;
-	net::close_sock(g_client);
-	g_client = net::BADSOCK;
-	if (!g_inbuf.empty()) msg("%s\n", g_inbuf.c_str());
-	g_inbuf.clear();
-}
-
-static void close_pending() {
-	net::close_sock(g_pending);
-	g_pending = net::BADSOCK;
-}
-
-// Connects to the remote minihost, retrying until it listens; true once
-// connected. It refuses a connection already taken, so retrying is harmless.
-static bool connect_remote() {
-	if (g_pending == net::BADSOCK) {
-		g_pending = net::connect_start(g_remote_addr);
-		g_pending_ticks = 0;
-		if (g_pending == net::BADSOCK) return false;
-	}
-
-	const int state = net::connect_poll(g_pending);
-	if (state == net::CONNECT_PENDING && ++g_pending_ticks < kConnectTicks)
-		return false;
-	if (state != net::CONNECT_DONE) { // refused: not listening yet
-		close_pending();
-		return false;
-	}
-
-	g_client = g_pending;
-	g_pending = net::BADSOCK;
-	qstring hello("hello ");
-	hello += channel_token();
-	hello += '\n';
-	if (!net::send_all(g_client, hello.c_str(), hello.length())) {
-		net::close_sock(g_client);
-		g_client = net::BADSOCK;
-		return false;
-	}
-	return true;
-}
-
-// Accepts the minihost's connection (or makes it, to a remote one), then
-// prints what it sent
-static void drain_channel() {
-	if (g_client == net::BADSOCK) {
-		if (g_remote_run) {
-			if (!connect_remote()) return;
-		} else {
-			if (g_listener == net::BADSOCK) return;
-			g_client = net::accept_pending(g_listener);
-			if (g_client == net::BADSOCK) return;
-		}
-		rv_log("reverb-minihost connected");
-		refresh_controls();
-	}
-
-	char buf[4096];
-	int n;
-	while ((n = net::recv_some(g_client, buf, sizeof(buf))) > 0)
-		g_inbuf.append(buf, size_t(n));
-	net::take_lines(
-		g_inbuf, [](const std::string& line) { msg("%s\n", line.c_str()); });
-
-	if (n == net::RECV_CLOSED || n == net::RECV_ERROR) {
-		close_client();
-		rv_log("reverb-minihost disconnected");
-		refresh_controls();
-	}
-}
-
-static int idaapi log_timer_cb(void*) {
-	drain_channel();
-	drain_log();
-	return 200;
-}
-
-static void stop_following() {
-	if (g_timer == nullptr) return;
-	unregister_timer(g_timer);
-	g_timer = nullptr;
-	drain_channel();
-	close_client();
-	close_pending();
-	g_remote_run = false;
-	drain_log();
-	if (!g_partial.empty()) msg("%s\n", g_partial.c_str());
-	g_partial.clear();
-}
-
-bool minihost_connected() { return g_client != net::BADSOCK; }
-
-bool send_command(const char* command) {
-	if (g_client == net::BADSOCK) return false;
-	std::string line(command);
-	line += '\n';
-	if (net::send_all(g_client, line.data(), line.size())) return true;
-	close_client();
-	return false;
 }
 
 /**
- * @brief Readies the channel's end for a run with @p args: when they say
- * --listen, the address of the target to connect to
+ * @brief Follows a run with @p args: when they say --listen, by connecting to
+ * the target
  *
  * @return false if the run can't be followed
  */
@@ -535,31 +309,135 @@ static bool start_remote_run(const qstring& args) {
 	const size_t at = args.find("--listen ");
 	qstring host;
 	const bool remote = remote_target(&host);
-	g_remote_run = at != qstring::npos;
+	const bool remote_run = at != qstring::npos;
 
-	if (g_remote_run != remote) {
+	if (remote_run != remote)
 		rv_log("The debugger target changed since the minihost was set up: "
 			   "open the minihost settings and press OK, then start again");
-		if (!g_remote_run) return true; // the loopback channel may still work
+	if (!remote_run) { // the loopback channel may still work
+		begin_run(nullptr);
+		return true;
 	}
-	if (!g_remote_run) return true;
 
+	sockaddr_in addr;
 	const int port = atoi(args.c_str() + at + qstrlen("--listen "));
-	if (host.empty() ||
-		!net::resolve_ipv4(host.c_str(), port, &g_remote_addr)) {
+	if (host.empty() || !net::resolve_ipv4(host.c_str(), port, &addr)) {
 		rv_log("Can't resolve the debugger host \"%s\": the minihost's log "
 			   "and controls are unavailable",
 			host.c_str());
-		g_remote_run = false;
 		return false;
 	}
 	rv_log("Connecting to reverb-minihost at %s:%d", host.c_str(), port);
+	begin_run(&addr);
 	return true;
+}
+
+// Telling the user why the minihost didn't start: IDA's own message doesn't
+// say, and the cause is nearly always on the target
+
+// The debug server a target of this database's file type runs
+static const char* debug_server_name() {
+	switch (inf_get_filetype()) {
+	case f_PE:	  return "win64_remote.exe";
+	case f_MACHO: return "mac_server";
+	default:	  return "linux_server";
+	}
+}
+
+static void print_start_hint() {
+	qstring app, args, sdir, host;
+	get_process_options(&app, &args, nullptr, &sdir, &host, nullptr, nullptr);
+	if (!is_minihost(app)) return;
+	qstring target;
+	const bool remote = remote_target(&target);
+	const bool windows = inf_get_filetype() == f_PE;
+
+	if (remote)
+		rv_log("reverb-minihost didn't start on %s. There, check that:",
+			target.c_str());
+	else
+		rv_log("reverb-minihost didn't start. Check that:");
+	rv_log("  - %s exists and is executable%s, built for the target's OS "
+		   "and CPU",
+		app.c_str(), windows ? "" : " (chmod +x)");
+
+	// The plugin path is the last argument, in quotes
+	const size_t close = args.rfind('"');
+	const size_t open = close == 0 || close == qstring::npos
+							? qstring::npos
+							: args.rfind('"', close - 1);
+	if (open != qstring::npos) {
+		const qstring plugin = bundle_of(args.substr(open + 1, close));
+		rv_log("  - %s is at %s", base_name(plugin).c_str(),
+			dir_name(plugin).c_str());
+	}
+	if (remote)
+		rv_log("  - %s runs there, and IDA may reach it (%s -v logs each "
+			   "request)",
+			debug_server_name(), debug_server_name());
+	if (app != g_set.app || args != g_set.args || sdir != g_set.sdir)
+		rv_log("  - the Process options were edited since REverb set them: "
+			   "paths go in Debugger > REverb minihost > Settings, and "
+			   "pressing OK there sets them again");
+
+	rv_log("The same command in a terminal%s shows the real error:",
+		remote ? " there" : "");
+	if (windows)
+		rv_log("  cd /d \"%s\" && \"%s\" %s", sdir.c_str(), app.c_str(),
+			args.c_str());
+	else
+		rv_log("  cd \"%s\" && \"%s\" %s", sdir.c_str(), app.c_str(),
+			args.c_str());
+}
+
+// Between Start process and either the process or the failure
+static bool g_start_watched = false;
+static bool g_start_seen = false;
+static qtimer_t g_start_timer = nullptr;
+
+static void end_start_watch() {
+	g_start_watched = false;
+	if (g_start_timer != nullptr) unregister_timer(g_start_timer);
+	g_start_timer = nullptr;
+}
+
+// A second later: the process start notification had time to arrive
+static int idaapi start_timer_cb(void*) {
+	g_start_timer = nullptr; // -1 below unregisters it
+	if (g_start_watched && !g_start_seen &&
+		get_process_state() == DSTATE_NOTASK)
+		print_start_hint();
+	g_start_watched = false;
+	return -1;
+}
+
+// The pre event names the action, the post one (for the same action) doesn't
+static void on_action(bool pre, const char* name) {
+	if (pre) {
+		if (name == nullptr || !streq(name, "ProcessStart")) return;
+		qstring app;
+		get_process_options(
+			&app, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+		end_start_watch();
+		g_start_watched =
+			is_minihost(app) && get_process_state() == DSTATE_NOTASK;
+		g_start_seen = false;
+	} else if (g_start_watched && g_start_timer == nullptr) {
+		if (g_start_seen || get_process_state() != DSTATE_NOTASK)
+			end_start_watch();
+		else
+			g_start_timer = register_timer(1000, start_timer_cb, nullptr);
+	}
 }
 
 // Another debugger may be remote, or not: the options follow it. The event
 // also comes while IDA starts a process, when they must stay as they are.
 static ssize_t idaapi ui_cb(void*, int code, va_list va) {
+	if (code == ui_preprocess_action || code == ui_postprocess_action) {
+		const bool pre = code == ui_preprocess_action;
+		on_action(pre, pre ? va_arg(va, const char*) : nullptr);
+		return 0;
+	}
 	if (code != ui_debugger_menu_change || va_arg(va, int) == 0) return 0;
 	static const debugger_t* last = nullptr;
 	if (dbg == last || get_process_state() != DSTATE_NOTASK) return 0;
@@ -568,37 +446,32 @@ static ssize_t idaapi ui_cb(void*, int code, va_list va) {
 	return 0;
 }
 
-static ssize_t idaapi dbg_cb(void*, int code, va_list) {
+static ssize_t idaapi dbg_cb(void*, int code, va_list va) {
+	if (code == dbg_request_error) {
+		const int failed = va_arg(va, int);
+		if (g_start_watched && (failed == ui_dbg_start_process ||
+								   failed == ui_dbg_request_start_process)) {
+			end_start_watch();
+			print_start_hint();
+		}
+		return 0;
+	}
 	if (code == dbg_process_start) {
+		g_start_seen = true;
 		qstring app, args;
 		get_process_options(
 			&app, &args, nullptr, nullptr, nullptr, nullptr, nullptr);
-		if (!is_minihost(app)) return 0;
-
-		close_client(); // anything left from an earlier run
-		close_pending();
-		if (!start_remote_run(args)) return 0;
-		if (!g_log_path.empty()) {
-			// The process hasn't run yet: a log left by an earlier run goes
-			qunlink(g_log_path.c_str());
-			g_offset = 0;
-			g_partial.clear();
-		}
-		if (g_timer == nullptr)
-			g_timer = register_timer(200, log_timer_cb, nullptr);
+		if (is_minihost(app)) start_remote_run(args);
 
 	} else if (code == dbg_process_exit || code == dbg_process_detach) {
-		stop_following();
+		end_run();
 	}
 	return 0;
 }
 
 void init() {
-	if (net::init()) g_listener = net::listen_loopback(&g_port);
-	if (g_listener == net::BADSOCK) {
-		g_port = 0;
+	if (!channel_init())
 		rv_log("Couldn't listen for reverb-minihost: its log goes to a file");
-	}
 
 	hook_to_notification_point(HT_DBG, dbg_cb);
 	hook_to_notification_point(HT_UI, ui_cb);
@@ -607,15 +480,10 @@ void init() {
 
 void term() {
 	term_controls();
-	stop_following();
+	end_start_watch();
 	unhook_from_notification_point(HT_DBG, dbg_cb);
 	unhook_from_notification_point(HT_UI, ui_cb);
-
-	close_client();
-	net::close_sock(g_listener);
-	g_listener = net::BADSOCK;
-	g_port = 0;
-	net::term();
+	channel_term();
 }
 
 } // namespace rv::debug

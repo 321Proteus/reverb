@@ -1,6 +1,9 @@
+// channel.hpp first: winsock2.h must come before windows.h
+#include "channel.hpp"
 #include "controls.hpp"
 #include "core/log.hpp"
 #include "launch.hpp"
+#include "settings.hpp"
 #include <kernwin.hpp>
 #include <loader.hpp>
 #include <pro.h>

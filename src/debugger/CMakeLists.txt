@@ -1,10 +1,14 @@
 target_sources(reverb PRIVATE
     breakpoint.cpp
     breakpoint.hpp
+    channel.cpp
+    channel.hpp
     controls.cpp
     controls.hpp
     launch.cpp
     launch.hpp
+    settings.cpp
+    settings.hpp
 )
 
 # The minihost control icons
