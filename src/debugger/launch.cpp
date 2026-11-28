@@ -14,6 +14,7 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#include <sys/stat.h>
 #endif
 
 #include "controls.hpp"
@@ -30,11 +31,28 @@
 
 namespace rv::debug {
 
-#ifdef _WIN32
-static const char kHostName[] = "reverb-minihost.exe";
+// The minihost of each OS has a name of its own: the release puts them all
+// next to the plugin (see src/minihost/CMakeLists.txt)
+static const char kLinuxHost[] = "reverb-minihost-linux";
+static const char kMacHost[] = "reverb-minihost-macos";
+static const char kWindowsHost[] = "reverb-minihost.exe";
+
+#if defined(_WIN32)
+static const char* const kHostName = kWindowsHost;
+#elif defined(__APPLE__)
+static const char* const kHostName = kMacHost;
 #else
-static const char kHostName[] = "reverb-minihost";
+static const char* const kHostName = kLinuxHost;
 #endif
+
+// The minihost for a target running this database's kind of binary
+static const char* target_host_name() {
+	switch (inf_get_filetype()) {
+	case f_PE:	  return kWindowsHost;
+	case f_MACHO: return kMacHost;
+	default:	  return kLinuxHost;
+	}
+}
 
 // What the minihost can host, best first. VST2 is last: its detection goes
 // through the ambiguous main export.
@@ -75,7 +93,19 @@ static bool find_minihost(qstring* out) {
 	char path[QMAXPATH];
 	qmakepath(path, sizeof(path), dir.c_str(), kHostName, nullptr);
 	*out = path;
-	return qfileexist(path);
+	if (!qfileexist(path)) return false;
+
+#ifndef _WIN32
+	// Unzipping (as IDA's plugin manager does) may drop the executable bit
+	struct stat st;
+	if (stat(path, &st) == 0 && (st.st_mode & S_IXUSR) == 0) {
+		if (chmod(path, st.st_mode | S_IXUSR | S_IXGRP | S_IXOTH) == 0)
+			rv_log("Made %s executable", path);
+		else
+			rv_log("%s isn't executable: run chmod +x on it", path);
+	}
+#endif
+	return true;
 }
 
 // Paths of the target, which may use either separator whatever IDA runs on
@@ -122,8 +152,7 @@ static qstring default_remote_minihost(const qstring& plugin) {
 			: '/';
 	qstring out = dir;
 	if (!out.empty()) out += sep;
-	out += "reverb-minihost";
-	if (inf_get_filetype() == f_PE) out += ".exe";
+	out += target_host_name();
 	return out;
 }
 
@@ -289,8 +318,9 @@ bool configure_minihost(InterfaceSet formats, bool keep_typed) {
 
 	qstring host;
 	if (!find_minihost(&host)) {
-		rv_log("reverb-minihost not found next to the plugin (or set "
-			   "REVERB_MINIHOST): the debugger options are unchanged");
+		rv_log("%s not found next to the plugin (or set REVERB_MINIHOST): "
+			   "the debugger options are unchanged",
+			kHostName);
 		return false;
 	}
 

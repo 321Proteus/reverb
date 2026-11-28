@@ -96,6 +96,13 @@ jobs:
             -exec cp -v {} artifacts/ \; || true
           ls artifacts | grep -E 'reverb\.(so|dll|dylib)$' > /dev/null \
             || { echo "No plugin binary found"; exit 1; }
+          # reverb-minihost, named per OS (src/minihost/CMakeLists.txt)
+          find ida-sdk/bin build -type f \
+            \( -name 'reverb-minihost-linux' -o -name 'reverb-minihost-macos' \
+               -o -name 'reverb-minihost.exe' \) \
+            -exec cp -v {} artifacts/ \; || true
+          ls artifacts | grep -E '^reverb-minihost' > /dev/null \
+            || { echo "No reverb-minihost binary found"; exit 1; }
           cp -r assets artifacts/
           jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
 
@@ -147,13 +154,15 @@ jobs:
           p="parts/reverb-ida${v}"
           mkdir -p pkg
           cp -R "${p}-linux/." pkg/
-          cp "${p}-windows/reverb.dll" pkg/
+          cp "${p}-windows/reverb.dll" "${p}-windows/reverb-minihost.exe" pkg/
           if [ -d "${p}-macos-arm64" ]; then
-            lipo -create \
-              "${p}-macos-arm64/reverb.dylib" \
-              "${p}-macos-x64/reverb.dylib" \
-              -output pkg/reverb.dylib
+            for f in reverb.dylib reverb-minihost-macos; do
+              lipo -create "${p}-macos-arm64/$f" "${p}-macos-x64/$f" \
+                -output "pkg/$f"
+            done
           fi
+          # Artifacts lose the executable bit; the zip keeps it
+          chmod +x pkg/reverb-minihost-*
           (cd pkg && zip -r "../reverb-ida${v}.zip" .)
 
       - name: Upload package
