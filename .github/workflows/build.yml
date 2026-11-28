@@ -103,7 +103,7 @@ jobs:
             -exec cp -v {} artifacts/ \; || true
           ls artifacts | grep -E '^reverb-minihost' > /dev/null \
             || { echo "No reverb-minihost binary found"; exit 1; }
-          cp -r assets artifacts/
+          cp -r assets README.md LICENSE artifacts/
           jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
 
       - name: Upload artifacts
@@ -131,8 +131,9 @@ jobs:
           echo "versions: $VERSIONS, build: $BUILD"
           [ "$VERSIONS" = success ] && [ "$BUILD" = success ]
 
+  # Also on pull requests, to check the zip; only a tag releases it
   package:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request'
     needs: [versions, build]
     runs-on: macos-latest
     name: package for IDA ${{ matrix.ida }}
@@ -155,15 +156,31 @@ jobs:
           mkdir -p pkg
           cp -R "${p}-linux/." pkg/
           cp "${p}-windows/reverb.dll" "${p}-windows/reverb-minihost.exe" pkg/
-          if [ -d "${p}-macos-arm64" ]; then
-            for f in reverb.dylib reverb-minihost-macos; do
-              lipo -create "${p}-macos-arm64/$f" "${p}-macos-x64/$f" \
-                -output "pkg/$f"
-            done
-          fi
+          for f in reverb.dylib reverb-minihost-macos; do
+            lipo -create "${p}-macos-arm64/$f" "${p}-macos-x64/$f" \
+              -output "pkg/$f"
+          done
           # Artifacts lose the executable bit; the zip keeps it
           chmod +x pkg/reverb-minihost-*
+
+          # The platforms this zip has binaries for: hcli's default is all of
+          # them, Arm Linux and Windows included
+          jq '.plugin.platforms = ["linux-x86_64", "windows-x86_64",
+                "macos-x86_64", "macos-aarch64"]' \
+            pkg/ida-plugin.json > pkg/ida-plugin.json.tmp
+          mv pkg/ida-plugin.json.tmp pkg/ida-plugin.json
+
           (cd pkg && zip -r "../reverb-ida${v}.zip" .)
+
+      - name: Check package
+        shell: bash
+        run: |
+          zip="reverb-ida${{ matrix.ida }}.zip"
+          zipinfo "$zip"
+          # Every minihost in the zip is executable
+          bad="$(zipinfo "$zip" | awk '$NF ~ /^reverb-minihost-/ && $1 !~ /x/')"
+          [ -z "$bad" ] || { echo "Not executable: $bad"; exit 1; }
+          pipx run --spec ida-hcli hcli plugin lint "$zip"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
