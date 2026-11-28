@@ -143,6 +143,20 @@ bool connect_channel(const std::string& address,
 	std::function<void(const std::string&)> on_line);
 
 /**
+ * @brief Listens at @p address for the REverb plugin, for a remote target:
+ * the plugin connects to it, as it can reach the target's debug server.
+ * Until then the log is kept, and sent once it has connected.
+ *
+ * @param address "ip:port". the ip defaults to 0.0.0.0 (every interface)
+ * @param token what the plugin's first line ("hello <token>") must carry
+ * @param on_line the callback each line it sends goes to, on a thread of its
+ * own
+ * @return false if the address can't be listened at
+ */
+bool listen_channel(const std::string& address, const std::string& token,
+	std::function<void(const std::string&)> on_line);
+
+/**
  * @brief Also writes the log to @p path (truncated first): the REverb plugin
  * follows it and shows it in IDA's Output window
  *

@@ -50,6 +50,11 @@ struct host_settings_t {
 	bool realtime = true;
 	bool process = true;
 	qstring extra; ///< Appended to the arguments as typed
+
+	// With a remote debugger: the target's paths, and the minihost's port
+	qstring remote_minihost; ///< Empty: next to the plugin's bundle
+	qstring remote_plugin;	 ///< Empty: the input file's path
+	int remote_port = 23950;
 };
 
 /** @brief The settings of this database, or the defaults */

@@ -110,6 +110,8 @@ bool edit_settings() {
 	ushort checks = (s.notes ? 1 : 0) | (s.paused ? 2 : 0) | (s.step ? 16 : 0) |
 					(s.realtime ? 4 : 0) | (s.process ? 8 : 0);
 	qstring extra = s.extra;
+	qstring rminihost = s.remote_minihost, rplugin = s.remote_plugin;
+	sval_t rport = s.remote_port;
 
 	static const char form[] =
 		"REverb minihost settings\n"
@@ -134,18 +136,28 @@ bool edit_settings() {
 		"phases:C>>\n"
 		"\n"
 		"<#Passed as typed, before the plugin path#"
-		"~E~xtra arguments     :q:1024:40::>\n";
+		"~E~xtra arguments     :q:1024:40::>\n"
+		"\n"
+		"With a remote debugger, on the target machine\n"
+		"<#Empty for reverb-minihost next to the plugin bundle#"
+		"Minihost p~a~th       :q:1024:40::>\n"
+		"<#Empty for the input file path of this database#"
+		"P~l~ugin path         :q:1024:40::>\n"
+		"<#The minihost listens there, and IDA connects to it#"
+		"~C~hannel port        :D:8:12::>\n";
 
 	for (;;) {
 
 		if (ask_form(form, &formats, &format_sel, &cls, &rate, &block, &signals,
-				&signal_sel, &checks, &extra) != 1)
+				&signal_sel, &checks, &extra, &rminihost, &rplugin,
+				&rport) != 1)
 			return false;
 
 		if (cls < 0 || rate < 1000 || rate > 768000 || block < 1 ||
-			block > 65536) {
+			block > 65536 || rport < 1 || rport > 65535) {
 			warning("Expected a plugin index from 0, a sample rate of 1000 to "
-					"768000 Hz and a block size of 1 to 65536 frames");
+					"768000 Hz, a block size of 1 to 65536 frames and a port "
+					"of 1 to 65535");
 			continue;
 		}
 
@@ -164,6 +176,12 @@ bool edit_settings() {
 	s.step = (checks & 16) != 0;
 	s.extra = extra;
 	s.extra.trim2();
+
+	s.remote_minihost = rminihost;
+	s.remote_minihost.trim2();
+	s.remote_plugin = rplugin;
+	s.remote_plugin.trim2();
+	s.remote_port = int(rport);
 
 	save_settings(s);
 	if (reconfigure_minihost())

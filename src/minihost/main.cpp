@@ -51,6 +51,9 @@ static void usage(const char* argv0) {
 		"                   stop, deactivate, unload ('run' stops stepping)\n"
 		"  --connect A  connect to the REverb plugin at A (127.0.0.1:port):\n"
 		"               the log goes to IDA, and IDA can send commands\n"
+		"  --listen A   for a remote target: wait for the REverb plugin to\n"
+		"               connect at A ([ip:]port, every interface by default)\n"
+		"  --token T    what the plugin must say first when it connects\n"
 		"  --log FILE   also write the log to FILE (the REverb plugin shows "
 		"it in IDA's Output window)\n"
 		"  -h, --help\n"
@@ -119,7 +122,7 @@ int main(int argc, char** argv) {
 	std::string path;
 	std::optional<Interface> format;
 	LoadOptions opts;
-	std::string connect_to;
+	std::string connect_to, listen_at, token;
 	EngineOptions eng;
 
 	bool once = false;
@@ -147,6 +150,12 @@ int main(int argc, char** argv) {
 
 		} else if (a == "--connect" && i + 1 < argc) {
 			connect_to = argv[++i];
+
+		} else if (a == "--listen" && i + 1 < argc) {
+			listen_at = argv[++i];
+
+		} else if (a == "--token" && i + 1 < argc) {
+			token = argv[++i];
 
 		} else if (a == "--log" && i + 1 < argc) {
 			const char* log = argv[++i];
@@ -208,6 +217,9 @@ int main(int argc, char** argv) {
 	if (!connect_to.empty() && !connect_channel(connect_to, handle_command))
 		rv_host_log(
 			"can't connect to the REverb plugin at %s", connect_to.c_str());
+	if (!listen_at.empty() && !listen_channel(listen_at, token, handle_command))
+		rv_host_log(
+			"can't listen for the REverb plugin at %s", listen_at.c_str());
 
 	const HostModule* module = format ? get_host_module(*format) : nullptr;
 	if (module == nullptr) {
