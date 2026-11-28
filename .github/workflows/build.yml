@@ -26,14 +26,13 @@ jobs:
       - id: v
         run: |
           echo "ida=$(jq -c '.plugin.idaVersions' ida-plugin.json)" >> "$GITHUB_OUTPUT"
-          # macOS runners are expensive: only build them for the latest SDK
+          # Every OS for every IDA version
           matrix="$(jq -c '
-            (.plugin.idaVersions | max_by(split(".") | map(tonumber))) as $latest
-            | [ .plugin.idaVersions[] as $ida
+            [ .plugin.idaVersions[] as $ida
                 | ({runner: "ubuntu-latest",  name: "linux"},
                    {runner: "windows-latest", name: "windows"},
-                   (select($ida == $latest) | {runner: "macos-latest",   name: "macos-arm64"}),
-                   (select($ida == $latest) | {runner: "macos-15-intel", name: "macos-x64"}))
+                   {runner: "macos-latest",   name: "macos-arm64"},
+                   {runner: "macos-15-intel", name: "macos-x64"})
                   as $os
                 | {ida: $ida, os: $os} ]
             | {include: .}' ida-plugin.json)"
@@ -96,7 +95,14 @@ jobs:
             -exec cp -v {} artifacts/ \; || true
           ls artifacts | grep -E 'reverb\.(so|dll|dylib)$' > /dev/null \
             || { echo "No plugin binary found"; exit 1; }
-          cp -r assets artifacts/
+          # reverb-minihost, named per OS (src/minihost/CMakeLists.txt)
+          find ida-sdk/bin build -type f \
+            \( -name 'reverb-minihost-linux' -o -name 'reverb-minihost-macos' \
+               -o -name 'reverb-minihost.exe' \) \
+            -exec cp -v {} artifacts/ \; || true
+          ls artifacts | grep -E '^reverb-minihost' > /dev/null \
+            || { echo "No reverb-minihost binary found"; exit 1; }
+          cp -r assets README.md LICENSE artifacts/
           jq '.plugin.idaVersions = "==${{ matrix.ida }}"' ida-plugin.json > artifacts/ida-plugin.json
 
       - name: Upload artifacts
@@ -124,8 +130,9 @@ jobs:
           echo "versions: $VERSIONS, build: $BUILD"
           [ "$VERSIONS" = success ] && [ "$BUILD" = success ]
 
+  # Also on pull requests, to check the zip; only a tag releases it
   package:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request'
     needs: [versions, build]
     runs-on: macos-latest
     name: package for IDA ${{ matrix.ida }}
@@ -147,14 +154,32 @@ jobs:
           p="parts/reverb-ida${v}"
           mkdir -p pkg
           cp -R "${p}-linux/." pkg/
-          cp "${p}-windows/reverb.dll" pkg/
-          if [ -d "${p}-macos-arm64" ]; then
-            lipo -create \
-              "${p}-macos-arm64/reverb.dylib" \
-              "${p}-macos-x64/reverb.dylib" \
-              -output pkg/reverb.dylib
-          fi
+          cp "${p}-windows/reverb.dll" "${p}-windows/reverb-minihost.exe" pkg/
+          for f in reverb.dylib reverb-minihost-macos; do
+            lipo -create "${p}-macos-arm64/$f" "${p}-macos-x64/$f" \
+              -output "pkg/$f"
+          done
+          # Artifacts lose the executable bit; the zip keeps it
+          chmod +x pkg/reverb-minihost-*
+
+          # The platforms this zip has binaries for: hcli's default is all of
+          # them, Arm Linux and Windows included
+          jq '.plugin.platforms = ["linux-x86_64", "windows-x86_64",
+                "macos-x86_64", "macos-aarch64"]' \
+            pkg/ida-plugin.json > pkg/ida-plugin.json.tmp
+          mv pkg/ida-plugin.json.tmp pkg/ida-plugin.json
+
           (cd pkg && zip -r "../reverb-ida${v}.zip" .)
+
+      - name: Check package
+        shell: bash
+        run: |
+          zip="reverb-ida${{ matrix.ida }}.zip"
+          zipinfo "$zip"
+          # Every minihost in the zip is executable
+          bad="$(zipinfo "$zip" | awk '$NF ~ /^reverb-minihost-/ && $1 !~ /x/')"
+          [ -z "$bad" ] || { echo "Not executable: $bad"; exit 1; }
+          pipx run --spec ida-hcli hcli plugin lint "$zip"
 
       - name: Upload package
         uses: actions/upload-artifact@v4

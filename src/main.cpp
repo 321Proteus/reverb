@@ -24,6 +24,7 @@
 #include "ui/panel.hpp"
 #include "ui/report.hpp"
 #include "db/report.hpp"
+#include "debugger/breakpoint.hpp"
 #include "debugger/launch.hpp"
 
 /**
@@ -119,13 +120,14 @@ static void run_scan(rv::InterfaceSet is) {
 	});
 
 	rv::vtbl::reconstruct();
+	rv::debug::add_breakpoints(is, rv::get_detected_framework().fw);
 	rv::store_report(rv::report::entries());
 	rv::panel::show_later();
 }
 
 /** @brief Classify the format(s) and framework + load types */
 static rv::InterfaceSet detect() {
-	std::vector<qstring> exports;
+	std::vector<std::string> exports;
 	int n = get_entry_qty();
 
 	for (int i = 0; i < n; i++) {
@@ -133,7 +135,7 @@ static rv::InterfaceSet detect() {
 		qstring name;
 
 		get_entry_name(&name, ord);
-		exports.push_back(name);
+		exports.push_back(name.c_str());
 	}
 
 	rv::InterfaceSet formats = classify_from_exports(exports);
@@ -229,6 +231,7 @@ static plugmod_t* idaapi init(void) {
 	hook_to_notification_point(HT_UI, ui_event_cb, nullptr);
 	hook_to_notification_point(HT_IDB, idb_event_cb);
 	rv::panel::init();
+	rv::debug::init();
 
 	rv_log("plugin initialized");
 
@@ -236,6 +239,7 @@ static plugmod_t* idaapi init(void) {
 }
 
 static void idaapi term(void) {
+	rv::debug::term();
 	rv::panel::term();
 	unhook_from_notification_point(HT_UI, ui_event_cb);
 	unhook_from_notification_point(HT_IDB, idb_event_cb);

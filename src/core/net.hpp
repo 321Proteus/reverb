@@ -1,0 +1,347 @@
+#pragma once
+
+/**
+ * @file net.hpp
+ * @brief The loopback TCP channel between the plugin and the minihost
+ * log lines up, commands down
+ */
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <cerrno>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace rv::net {
+
+#ifdef _WIN32
+typedef SOCKET sock_t;
+constexpr sock_t BADSOCK = INVALID_SOCKET;
+#else
+typedef int sock_t;
+constexpr sock_t BADSOCK = -1;
+#endif
+
+/**
+ * @brief On Windows, initialize the networking library (call before anything
+ * else)
+ */
+inline bool init() {
+#ifdef _WIN32
+	WSADATA wsa;
+	return WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
+#else
+	return true;
+#endif
+}
+
+/**
+ * @brief Undoes init()
+ */
+inline void term() {
+#ifdef _WIN32
+	WSACleanup();
+#endif
+}
+
+inline void close_sock(sock_t s) {
+	if (s == BADSOCK) return;
+#ifdef _WIN32
+	closesocket(s);
+#else
+	::close(s);
+#endif
+}
+
+inline bool set_nonblocking(sock_t s) {
+#ifdef _WIN32
+	u_long on = 1;
+	return ioctlsocket(s, FIONBIO, &on) == 0;
+#else
+	const int fl = fcntl(s, F_GETFL, 0);
+	return fl >= 0 && fcntl(s, F_SETFL, fl | O_NONBLOCK) == 0;
+#endif
+}
+
+/**
+ * @brief On MacOS, Ensures that writes to a closed peer fail instead of SIGPIPE
+ * (that would kill IDA)
+ */
+inline void no_sigpipe(sock_t s) {
+#ifdef SO_NOSIGPIPE // macOS
+	int on = 1;
+	setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, (const char*)&on, sizeof(on));
+#else
+	(void)s;
+#endif
+}
+
+/**
+ * @brief set up TCP_NODELAY for sending lines instantly
+ */
+inline void no_delay(sock_t s) {
+	int on = 1;
+	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char*)&on, sizeof(on));
+}
+
+/**
+ * @brief Resolves @p host (a name or a dotted IPv4 address) to an IPv4 address
+ * with @p port. May block while a name is looked up.
+ */
+inline bool resolve_ipv4(const char* host, int port, sockaddr_in* out) {
+	addrinfo hints = {};
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	addrinfo* res = nullptr;
+
+	if (getaddrinfo(host, nullptr, &hints, &res) != 0 || res == nullptr)
+		return false;
+
+	*out = *(const sockaddr_in*)res->ai_addr;
+	out->sin_port = htons(uint16_t(port));
+	freeaddrinfo(res);
+	return true;
+}
+
+/** @brief True for 127.0.0.0/8 */
+inline bool is_loopback(const sockaddr_in& a) {
+	return (ntohl(a.sin_addr.s_addr) >> 24) == 127;
+}
+
+/**
+ * @brief Sets up a listener at @p ip (dotted IPv4, "0.0.0.0" for every
+ * interface) and @p *port, 0 for one the OS picks
+ *
+ * @param port in: the port to listen at, or 0; out: the port listened at
+ * @param nonblocking whether accept() returns at once
+ */
+inline sock_t listen_at(const char* ip, int* port, bool nonblocking) {
+	sock_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == BADSOCK) return BADSOCK;
+
+#ifndef _WIN32 // there, it would let others take the port over
+	int on = 1;
+	setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof(on));
+#endif
+
+	sockaddr_in a = {};
+	a.sin_family = AF_INET;
+	a.sin_port = htons(uint16_t(*port));
+
+	socklen_t len = sizeof(a);
+	if (inet_pton(AF_INET, ip, &a.sin_addr) != 1 ||
+		bind(s, (sockaddr*)&a, sizeof(a)) != 0 || listen(s, 1) != 0 ||
+		getsockname(s, (sockaddr*)&a, &len) != 0 ||
+		(nonblocking && !set_nonblocking(s))) {
+		close_sock(s);
+		return BADSOCK;
+	}
+
+	*port = ntohs(a.sin_port);
+	return s;
+}
+
+/**
+ * @brief Sets up a non-blocking loopback listener at localhost on port selected
+ * by the OS
+ */
+inline sock_t listen_loopback(int* port) {
+	*port = 0;
+	return listen_at("127.0.0.1", port, true);
+}
+
+/**
+ * @brief A connection waiting on @p listener, made non-blocking, BADSOCK if
+ * none
+ */
+inline sock_t accept_pending(sock_t listener) {
+	sock_t c = accept(listener, nullptr, nullptr);
+	if (c == BADSOCK) return BADSOCK;
+
+	set_nonblocking(c);
+	no_sigpipe(c);
+	no_delay(c);
+
+	return c;
+}
+
+/**
+ * @brief A blocking connection to the specific host and port
+ *
+ * @param host the target host (dotted IPv4 e.g. "127.0.0.1")
+ * @param port the target port
+ */
+inline sock_t connect_to(const char* host, int port) {
+	sock_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == BADSOCK) return BADSOCK;
+
+	sockaddr_in a = {};
+	a.sin_family = AF_INET;
+	a.sin_port = htons(uint16_t(port));
+
+	if (inet_pton(AF_INET, host, &a.sin_addr) != 1 ||
+		connect(s, (sockaddr*)&a, sizeof(a)) != 0) {
+		close_sock(s);
+		return BADSOCK;
+	}
+
+	no_sigpipe(s);
+	no_delay(s);
+	return s;
+}
+
+/**
+ * @brief Starts a non-blocking connection to @p a: poll it with
+ * connect_poll(). BADSOCK if it failed at once.
+ */
+inline sock_t connect_start(const sockaddr_in& a) {
+	sock_t s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == BADSOCK || !set_nonblocking(s)) {
+		close_sock(s);
+		return BADSOCK;
+	}
+
+	if (connect(s, (const sockaddr*)&a, sizeof(a)) != 0) {
+#ifdef _WIN32
+		const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+		const bool pending = errno == EINPROGRESS || errno == EINTR;
+#endif
+		if (!pending) {
+			close_sock(s);
+			return BADSOCK;
+		}
+	}
+
+	no_sigpipe(s);
+	no_delay(s);
+	return s;
+}
+
+enum : int {
+	CONNECT_FAILED = -1, ///< Refused or unreachable: close the socket
+	CONNECT_PENDING = 0, ///< Not yet: poll again later
+	CONNECT_DONE = 1,	 ///< Connected
+};
+
+/** @brief Where a connect_start() connection is, without waiting */
+inline int connect_poll(sock_t s) {
+#ifdef _WIN32 // a failed connect shows in the except set
+	fd_set w, e;
+	FD_ZERO(&w);
+	FD_ZERO(&e);
+	FD_SET(s, &w);
+	FD_SET(s, &e);
+	timeval tv = {};
+
+	const int r = select(0, nullptr, &w, &e, &tv);
+	if (r < 0) return CONNECT_FAILED;
+	if (r == 0) return CONNECT_PENDING;
+	if (FD_ISSET(s, &e)) return CONNECT_FAILED;
+
+#else // poll: IDA may have more files open than select handles
+	pollfd p = { s, POLLOUT, 0 };
+	const int r = poll(&p, 1, 0);
+
+	if (r < 0) return errno == EINTR ? CONNECT_PENDING : CONNECT_FAILED;
+	if (r == 0) return CONNECT_PENDING;
+
+#endif
+	int err = 0;
+	socklen_t len = sizeof(err);
+
+	if (getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &len) != 0 || err)
+		return CONNECT_FAILED;
+
+	return CONNECT_DONE;
+}
+
+enum : int {
+	RECV_CLOSED = 0,	   ///< The peer closed the connection
+	RECV_WOULD_BLOCK = -1, ///< Nothing to read yet (non-blocking)
+	RECV_ERROR = -2,	   ///< Error
+};
+
+/**
+ * Read what's at the socket
+ * @return The byte count, or a problem code
+ */
+inline int recv_some(sock_t s, char* buf, size_t size) {
+	const auto n = recv(s, buf, int(size), 0);
+	if (n > 0) return int(n);
+
+	if (n == 0) return RECV_CLOSED;
+
+#ifdef _WIN32
+	return WSAGetLastError() == WSAEWOULDBLOCK ? RECV_WOULD_BLOCK : RECV_ERROR;
+#else
+	return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+			   ? RECV_WOULD_BLOCK
+			   : RECV_ERROR;
+#endif
+}
+
+/** @brief Sends all of @p data, waiting while the socket's buffer is full */
+inline bool send_all(sock_t s, const char* data, size_t size) {
+
+#if defined(MSG_NOSIGNAL) // Linux: no SIGPIPE
+	const int flags = MSG_NOSIGNAL;
+#else
+	const int flags = 0;
+#endif
+	while (size > 0) {
+		const auto n = send(s, data, int(size), flags);
+		if (n > 0) {
+			data += n;
+			size -= size_t(n);
+			continue;
+		}
+
+#ifdef _WIN32
+		if (WSAGetLastError() != WSAEWOULDBLOCK) return false;
+		Sleep(1);
+#else
+		if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+			return false;
+
+		usleep(1000);
+#endif
+	}
+
+	return true;
+}
+
+/**
+ * @brief Moves the complete lines of @p buf to @p fn, keeping a partial one
+ */
+template <class F> inline void take_lines(std::string& buf, F&& fn) {
+	size_t start = 0;
+
+	for (size_t nl; (nl = buf.find('\n', start)) != std::string::npos;) {
+		size_t end = nl;
+		if (end > start && buf[end - 1] == '\r') end--;
+
+		fn(buf.substr(start, end - start));
+		start = nl + 1;
+	}
+
+	buf.erase(0, start);
+}
+
+} // namespace rv::net

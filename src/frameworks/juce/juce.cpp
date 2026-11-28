@@ -41,7 +41,20 @@ static qstring detect_version() {
 	return s;
 }
 
+// The AudioProcessor virtuals the plugin's own processor overrides
+static const bpt_spec_t breakpoints[] = {
+	{ "createPluginFilter", true },
+	{ "*::prepareToPlay", true },
+	{ "*::releaseResources", true },
+	{ "*::createEditor", true },
+	{ "*::processBlock", false },
+	{ "*::processBlockBypassed", false },
+	{ "*::setStateInformation", false },
+	{ "*::getStateInformation", false },
+	{ nullptr, false },
+};
+
 extern const FrameworkModule module = { nullptr, signals, std::size(signals),
-	&detect_version, nullptr, "juce" };
+	&detect_version, nullptr, "juce", breakpoints };
 
 } // namespace rv::juce

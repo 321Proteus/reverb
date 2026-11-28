@@ -1,5 +1,6 @@
 #pragma once
 #include "core/reverb.hpp"
+#include "debugger/breakpoint.hpp"
 
 /**
  * @file format.hpp
@@ -16,6 +17,8 @@ typedef struct {
 	void (*scan)();	 /**< Finds the format's entry points and records what they
 						say */
 	void (*label)(); /**< Names and types what scan() found */
+	/** Functions to break on, by the names label() gives or null */
+	const bpt_spec_t* breakpoints;
 } FormatModule;
 
 /**
