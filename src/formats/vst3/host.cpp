@@ -1,10 +1,14 @@
 /**
  * @file host.cpp
- * @brief VST3 for reverb-minihost: Some of the interfaces it calls, declared as
- * raw vtables, and the IIDs of iids.inc.
+ * @brief VST3 for reverb-minihost: the module entry, the component and its
+ * controller, and the plugin's lifecycle (the ABI is in host_abi.hpp, the
+ * objects the host implements in host_objects.hpp)
  */
 #include "formats/host.hpp"
+#include "host_abi.hpp"
+#include "host_objects.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -14,342 +18,7 @@
 namespace rv::vst3 {
 namespace {
 
-// PLUGIN_API: __stdcall on 32-bit Windows
-#if defined(_WIN32) && !defined(_WIN64)
-#define RV_PLUGIN_API __stdcall
-#else
-#define RV_PLUGIN_API
-#endif
-
-typedef int32_t int32;
-typedef uint32_t uint32;
-typedef int32 tresult;
-typedef char16_t TChar;
-
-#define RV_FUNKNOWN_METHODS(Self)                                              \
-	tresult(RV_PLUGIN_API* queryInterface)(                                    \
-		Self * self, const char* iid, void** obj);                             \
-	uint32(RV_PLUGIN_API* addRef)(Self * self);                                \
-	uint32(RV_PLUGIN_API* release)(Self * self);
-
-struct FUnknown;
-struct FUnknown_vtbl {
-	RV_FUNKNOWN_METHODS(FUnknown)
-};
-struct FUnknown {
-	FUnknown_vtbl* __vftable;
-};
-
-struct PFactoryInfo {
-	char vendor[64];
-	char url[256];
-	char email[128];
-	int32 flags;
-};
-struct PClassInfo {
-	char cid[16];
-	int32 cardinality;
-	char category[32];
-	char name[64];
-};
-
-struct IPluginFactory;
-struct IPluginFactory_vtbl {
-	RV_FUNKNOWN_METHODS(IPluginFactory)
-	tresult(RV_PLUGIN_API* getFactoryInfo)(
-		IPluginFactory* self, PFactoryInfo* info);
-	int32(RV_PLUGIN_API* countClasses)(IPluginFactory* self);
-	tresult(RV_PLUGIN_API* getClassInfo)(
-		IPluginFactory* self, int32 index, PClassInfo* info);
-	tresult(RV_PLUGIN_API* createInstance)(
-		IPluginFactory* self, const char* cid, const char* iid, void** obj);
-};
-struct IPluginFactory {
-	IPluginFactory_vtbl* __vftable;
-};
-
-// IPluginBase + IComponent, up to the methods we call
-typedef uint8_t TBool;
-typedef int32 MediaType;	// kAudio, kEvent
-typedef int32 BusDirection; // kInput, kOutput
-enum : int32 { kAudio = 0, kEvent = 1, kInput = 0, kOutput = 1 };
-
-struct BusInfo {
-	MediaType mediaType;
-	BusDirection direction;
-	int32 channelCount;
-	TChar name[128];
-	int32 busType;
-	uint32 flags;
-};
-
-// IPluginBase + IComponent
-struct IComponent;
-struct IComponent_vtbl {
-	RV_FUNKNOWN_METHODS(IComponent)
-	tresult(RV_PLUGIN_API* initialize)(IComponent* self, FUnknown* context);
-	tresult(RV_PLUGIN_API* terminate)(IComponent* self);
-	tresult(RV_PLUGIN_API* getControllerClassId)(IComponent* self, char* cid);
-	tresult(RV_PLUGIN_API* setIoMode)(IComponent* self, int32 mode);
-	int32(RV_PLUGIN_API* getBusCount)(
-		IComponent* self, MediaType type, BusDirection dir);
-	tresult(RV_PLUGIN_API* getBusInfo)(IComponent* self, MediaType type,
-		BusDirection dir, int32 index, BusInfo* bus);
-	tresult(RV_PLUGIN_API* getRoutingInfo)(
-		IComponent* self, void* in, void* out);
-	tresult(RV_PLUGIN_API* activateBus)(IComponent* self, MediaType type,
-		BusDirection dir, int32 index, TBool state);
-	tresult(RV_PLUGIN_API* setActive)(IComponent* self, TBool state);
-	tresult(RV_PLUGIN_API* setState)(IComponent* self, void* state);
-	tresult(RV_PLUGIN_API* getState)(IComponent* self, void* state);
-};
-struct IComponent {
-	IComponent_vtbl* __vftable;
-};
-
-struct IHostApplication;
-struct IHostApplication_vtbl {
-	RV_FUNKNOWN_METHODS(IHostApplication)
-	tresult(RV_PLUGIN_API* getName)(IHostApplication* self, TChar* name);
-	tresult(RV_PLUGIN_API* createInstance)(
-		IHostApplication* self, char* cid, char* iid, void** obj);
-};
-struct IHostApplication {
-	IHostApplication_vtbl* __vftable;
-};
-
-// Processing
-
-struct ProcessSetup {
-	int32 processMode;		  // kRealtime
-	int32 symbolicSampleSize; // kSample32
-	int32 maxSamplesPerBlock;
-	double sampleRate;
-};
-
-struct AudioBusBuffers {
-	int32 numChannels;
-	uint64_t silenceFlags;
-	float** channelBuffers32;
-};
-
-struct ProcessContext {
-	uint32 state;
-	double sampleRate;
-	int64_t projectTimeSamples;
-	int64_t systemTime;
-	int64_t continousTimeSamples;
-	double projectTimeMusic;
-	double barPositionMusic;
-	double cycleStartMusic;
-	double cycleEndMusic;
-	double tempo;
-	int32 timeSigNumerator;
-	int32 timeSigDenominator;
-	struct {
-		uint8_t keyNote;
-		uint8_t rootNote;
-		int16_t chordMask;
-	} chord;
-	int32 smpteOffsetSubframes;
-	struct {
-		uint32 framesPerSecond;
-		uint32 flags;
-	} frameRate;
-	int32 samplesToNextClock;
-};
-
-enum : uint32 { // ProcessContext::StatesAndFlags
-	kPlaying = 2,
-	kProjectTimeMusicValid = 512,
-	kTempoValid = 1024,
-	kBarPositionValid = 2048,
-	kTimeSigValid = 8192,
-	kContTimeValid = 131072,
-};
-
-struct NoteOnEvent {
-	int16_t channel;
-	int16_t pitch;
-	float tuning;
-	float velocity;
-	int32 length;
-	int32 noteId;
-};
-struct NoteOffEvent {
-	int16_t channel;
-	int16_t pitch;
-	float velocity;
-	int32 noteId;
-	float tuning;
-};
-
-struct Event {
-	int32 busIndex;
-	int32 sampleOffset;
-	double ppqPosition;
-	uint16_t flags;
-	uint16_t type; // kNoteOnEvent, kNoteOffEvent
-	union {
-		NoteOnEvent noteOn;
-		NoteOffEvent noteOff;
-		// The largest member, NoteExpressionTextEvent: sets size and alignment
-		struct {
-			uint32 typeId;
-			int32 noteId;
-			uint32 textLen;
-			const TChar* text;
-		} largest_;
-	};
-};
-static_assert(sizeof(void*) != 8 || sizeof(Event) == 48, "Event layout");
-enum : uint16_t { kNoteOnEvent = 0, kNoteOffEvent = 1 };
-
-struct IEventList;
-struct IEventList_vtbl {
-	RV_FUNKNOWN_METHODS(IEventList)
-	int32(RV_PLUGIN_API* getEventCount)(IEventList* self);
-	tresult(RV_PLUGIN_API* getEvent)(IEventList* self, int32 index, Event* e);
-	tresult(RV_PLUGIN_API* addEvent)(IEventList* self, Event* e);
-};
-struct IEventList {
-	IEventList_vtbl* __vftable;
-};
-
-struct ProcessData {
-	int32 processMode;
-	int32 symbolicSampleSize;
-	int32 numSamples;
-	int32 numInputs;
-	int32 numOutputs;
-	AudioBusBuffers* inputs;
-	AudioBusBuffers* outputs;
-	void* inputParameterChanges; // IParameterChanges, none sent
-	void* outputParameterChanges;
-	IEventList* inputEvents;
-	IEventList* outputEvents;
-	ProcessContext* processContext;
-};
-
-struct IAudioProcessor;
-struct IAudioProcessor_vtbl {
-	RV_FUNKNOWN_METHODS(IAudioProcessor)
-	tresult(RV_PLUGIN_API* setBusArrangements)(IAudioProcessor* self,
-		uint64_t* inputs, int32 numIns, uint64_t* outputs, int32 numOuts);
-	tresult(RV_PLUGIN_API* getBusArrangement)(
-		IAudioProcessor* self, BusDirection dir, int32 index, uint64_t* arr);
-	tresult(RV_PLUGIN_API* canProcessSampleSize)(
-		IAudioProcessor* self, int32 symbolicSampleSize);
-	uint32(RV_PLUGIN_API* getLatencySamples)(IAudioProcessor* self);
-	tresult(RV_PLUGIN_API* setupProcessing)(
-		IAudioProcessor* self, ProcessSetup* setup);
-	tresult(RV_PLUGIN_API* setProcessing)(IAudioProcessor* self, TBool state);
-	tresult(RV_PLUGIN_API* process)(IAudioProcessor* self, ProcessData* data);
-	uint32(RV_PLUGIN_API* getTailSamples)(IAudioProcessor* self);
-};
-struct IAudioProcessor {
-	IAudioProcessor_vtbl* __vftable;
-};
-
-#undef RV_FUNKNOWN_METHODS
-
-constexpr tresult kResultOk = 0;
-constexpr tresult kResultFalse = 1;
-constexpr tresult kNotImplemented = 3;
-#ifdef _WIN32 // E_NOINTERFACE
-constexpr tresult kNoInterface = (tresult)0x80004002;
-#else
-constexpr tresult kNoInterface = -1;
-#endif
-
-// DECLARE_CLASS_IID words as TUID bytes, laid out like INLINE_UID
-struct Iid {
-	char b[16];
-	constexpr Iid(uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4) : b{} {
-#ifdef _WIN32 // COM_COMPATIBLE
-		b[0] = char(l1), b[1] = char(l1 >> 8), b[2] = char(l1 >> 16);
-		b[3] = char(l1 >> 24), b[4] = char(l2 >> 16), b[5] = char(l2 >> 24);
-		b[6] = char(l2), b[7] = char(l2 >> 8);
-#else
-		b[0] = char(l1 >> 24), b[1] = char(l1 >> 16), b[2] = char(l1 >> 8);
-		b[3] = char(l1), b[4] = char(l2 >> 24), b[5] = char(l2 >> 16);
-		b[6] = char(l2 >> 8), b[7] = char(l2);
-#endif
-		b[8] = char(l3 >> 24), b[9] = char(l3 >> 16), b[10] = char(l3 >> 8);
-		b[11] = char(l3), b[12] = char(l4 >> 24), b[13] = char(l4 >> 16);
-		b[14] = char(l4 >> 8), b[15] = char(l4);
-	}
-	bool operator==(const char* tuid) const {
-		return std::memcmp(b, tuid, 16) == 0;
-	}
-};
-
-#define RV_IID(Name, l1, l2, l3, l4) constexpr Iid IID_##Name(l1, l2, l3, l4);
-#include "iids.inc"
-#undef RV_IID
-
-// Minimal IHostApplication, handed to initialize() as the context
-
-tresult RV_PLUGIN_API host_qi(
-	IHostApplication* self, const char* iid, void** obj) {
-	if (IID_FUnknown == iid || IID_IHostApplication == iid) {
-		*obj = self;
-		return kResultOk;
-	}
-	*obj = nullptr;
-	return kNoInterface;
-}
-
-uint32 RV_PLUGIN_API host_ref(IHostApplication*) { return 1; }
-tresult RV_PLUGIN_API host_get_name(IHostApplication*, TChar* name) {
-	const char* n = "reverb-minihost";
-	int i = 0;
-	for (; n[i] && i < 127; ++i)
-		name[i] = (TChar)n[i];
-	name[i] = 0;
-	return kResultOk;
-}
-tresult RV_PLUGIN_API host_create_instance(
-	IHostApplication*, char*, char*, void** obj) {
-	*obj = nullptr;
-	return kNoInterface; // no IMessage / IAttributeList yet
-}
-
-IHostApplication_vtbl g_host_vtbl = { host_qi, host_ref, host_ref,
-	host_get_name, host_create_instance };
-IHostApplication g_host_app = { &g_host_vtbl };
-
-// The input IEventList: the block's notes, owned by the host
-struct HostEventList {
-	IEventList base;
-	Event events[16];
-	int32 count;
-};
-
-tresult RV_PLUGIN_API events_qi(IEventList* self, const char* iid, void** obj) {
-	if (IID_FUnknown == iid || IID_IEventList == iid) {
-		*obj = self;
-		return kResultOk;
-	}
-	*obj = nullptr;
-	return kNoInterface;
-}
-uint32 RV_PLUGIN_API events_ref(IEventList*) { return 1; }
-int32 RV_PLUGIN_API events_count(IEventList* self) {
-	return ((HostEventList*)self)->count;
-}
-tresult RV_PLUGIN_API events_get(IEventList* self, int32 index, Event* e) {
-	const HostEventList* l = (const HostEventList*)self;
-	if (index < 0 || index >= l->count || e == nullptr) return kResultFalse;
-	*e = l->events[index];
-	return kResultOk;
-}
-tresult RV_PLUGIN_API events_add(IEventList*, Event*) {
-	return kResultFalse; // an input list
-}
-
-IEventList_vtbl g_events_vtbl = { events_qi, events_ref, events_ref,
-	events_count, events_get, events_add };
+using namespace abi;
 
 typedef IPluginFactory* (*GetFactoryFn)();
 typedef bool (*ModuleEntryFn)(void*);
@@ -445,14 +114,19 @@ public:
 		r = component_->__vftable->initialize(
 			component_, (FUnknown*)&g_host_app);
 		rv_host_log("IComponent::initialize -> %d", r);
+		if (r != kResultOk) return false;
 
-		return r == kResultOk;
+		host::step("controller");
+		create_controller();
+		return true;
 	}
 
 	void describe() const override {
-		rv_host_log("VST3 \"%s\": factory %p, component %p, processor %p",
+		rv_host_log("VST3 \"%s\": factory %p, component %p, processor %p, "
+					"controller %p%s",
 			name_.c_str(), (void*)factory_, (void*)component_,
-			(void*)processor_);
+			(void*)processor_, (void*)controller_,
+			shared_controller_ ? " (the component itself)" : "");
 	}
 
 	bool activate(const host::ProcessSetup& s) override {
@@ -493,6 +167,9 @@ public:
 		active_ = r == kResultOk;
 
 		event_list_.base.__vftable = &g_events_vtbl;
+		changes_.base.__vftable = &g_changes_vtbl;
+		for (HostQueue& q : changes_.queues)
+			q.base.__vftable = &g_queue_vtbl;
 		return active_;
 	}
 
@@ -539,6 +216,15 @@ public:
 		ctx.timeSigNumerator = 4;
 		ctx.timeSigDenominator = 4;
 
+		// The queued parameter changes, at frame 0
+		pending_.take(&taken_);
+		changes_.count = 0;
+		for (const host::ParamQueue::Change& c : taken_) {
+			if (changes_.count == kMaxChanges) break;
+			changes_.queues[changes_.count++] = { { &g_queue_vtbl }, c.id,
+				c.value };
+		}
+
 		ProcessData d = {};
 		d.numSamples = int32(b.frames);
 		d.numInputs = int32(in_bufs_.size());
@@ -546,6 +232,7 @@ public:
 		d.inputs = in_bufs_.empty() ? nullptr : in_bufs_.data();
 		d.outputs = out_bufs_.empty() ? nullptr : out_bufs_.data();
 		d.inputEvents = events_in_ ? &event_list_.base : nullptr;
+		d.inputParameterChanges = &changes_.base;
 		d.processContext = &ctx;
 
 		const tresult r = processor_->__vftable->process(processor_, &d);
@@ -569,7 +256,79 @@ public:
 		active_ = false;
 	}
 
+	size_t param_count() const override {
+		if (controller_ == nullptr) return 0;
+		const int32 n = controller_->__vftable->getParameterCount(controller_);
+		return n > 0 ? size_t(n) : 0;
+	}
+
+	bool param(size_t index, host::Param* out) const override {
+		if (controller_ == nullptr) return false;
+		IEditController_vtbl* v = controller_->__vftable;
+		ParameterInfo info = {};
+		if (v->getParameterInfo(controller_, int32(index), &info) != kResultOk)
+			return false;
+
+		out->id = info.id;
+		out->name = utf8(info.title);
+		out->stepped = info.stepCount > 0;
+		out->value = v->getParamNormalized(controller_, info.id);
+		TChar text[128] = {};
+		if (v->getParamStringByValue(controller_, info.id, out->value, text) ==
+			kResultOk)
+			out->text = utf8(text);
+		const std::string units = utf8(info.units);
+		if (!units.empty()) out->text += " " + units;
+		return true;
+	}
+
+	// The controller shows it at once; the processor gets it with a block
+	bool set_param(uint32_t id, double value) override {
+		if (controller_ == nullptr) {
+			rv_host_log("no edit controller: no parameters");
+			return false;
+		}
+		controller_->__vftable->setParamNormalized(controller_, id, value);
+		pending_.push(id, value);
+		if (active_) rv_host_log("the processor gets it with the next block");
+		else
+			rv_host_log("the processor gets it once processing runs");
+		return true;
+	}
+
+	bool save_state(std::vector<uint8_t>* out) override {
+		if (component_ == nullptr) return false;
+		MemStream m;
+		m.base.__vftable = &g_stream_vtbl;
+		const tresult r = component_->__vftable->getState(component_, &m.base);
+		rv_host_log("IComponent::getState -> %d", r);
+		if (r != kResultOk) return false;
+		*out = std::move(m.data);
+		return true;
+	}
+
+	// The component's state, then the controller's view of it, as a host
+	// loading a preset does
+	bool load_state(const std::vector<uint8_t>& data) override {
+		if (component_ == nullptr) return false;
+		MemStream m;
+		m.base.__vftable = &g_stream_vtbl;
+		m.data = data;
+		tresult r = component_->__vftable->setState(component_, &m.base);
+		rv_host_log("IComponent::setState -> %d (%lld of %zu bytes read)", r,
+			(long long)m.pos, data.size());
+		if (r != kResultOk) return false;
+
+		if (controller_ != nullptr) {
+			m.pos = 0;
+			r = controller_->__vftable->setComponentState(controller_, &m.base);
+			rv_host_log("IEditController::setComponentState -> %d", r);
+		}
+		return true;
+	}
+
 	void unload() override {
+		destroy_controller();
 		if (processor_ != nullptr) {
 			processor_->__vftable->release(processor_);
 			processor_ = nullptr;
@@ -596,6 +355,102 @@ private:
 	struct Bus {
 		host::Channels ch;
 	};
+
+	// The edit controller: the component itself, or a class of its own.
+	// Parameters live there.
+	void create_controller() {
+		IComponent_vtbl* cv = component_->__vftable;
+		void* obj = nullptr;
+		if (cv->queryInterface(component_, IID_IEditController.b, &obj) ==
+				kResultOk &&
+			obj != nullptr) {
+			controller_ = (IEditController*)obj;
+			shared_controller_ = true;
+			rv_host_log("IEditController: the component itself");
+
+		} else {
+			char cid[16] = {};
+			static const char zero[16] = {};
+			if (cv->getControllerClassId(component_, cid) != kResultOk ||
+				!std::memcmp(cid, zero, 16)) {
+				rv_host_log("no edit controller class: no parameters");
+				return;
+			}
+
+			tresult r = factory_->__vftable->createInstance(
+				factory_, cid, IID_IEditController.b, &obj);
+			if (r != kResultOk || obj == nullptr) {
+				rv_host_log("creating the edit controller failed (%d)", r);
+				return;
+			}
+
+			controller_ = (IEditController*)obj;
+			r = controller_->__vftable->initialize(
+				controller_, (FUnknown*)&g_host_app);
+			rv_host_log("IEditController @ %p, vtable @ %p: initialize -> %d",
+				obj, (void*)controller_->__vftable, r);
+
+			if (r != kResultOk) {
+				controller_->__vftable->release(controller_);
+				controller_ = nullptr;
+				return;
+			}
+
+			connect_points(true);
+		}
+
+		IEditController_vtbl* v = controller_->__vftable;
+		v->setComponentHandler(controller_, &g_handler);
+
+		// The controller learns the component's state
+		MemStream m;
+		m.base.__vftable = &g_stream_vtbl;
+		if (cv->getState(component_, &m.base) == kResultOk) {
+			m.pos = 0;
+			v->setComponentState(controller_, &m.base);
+		}
+		rv_host_log("%zu parameters ('params' lists them)", param_count());
+	}
+
+	// Component and controller talk through their connection points
+	void connect_points(bool on) {
+		void *a = nullptr, *b = nullptr;
+		component_->__vftable->queryInterface(
+			component_, IID_IConnectionPoint.b, &a);
+		controller_->__vftable->queryInterface(
+			controller_, IID_IConnectionPoint.b, &b);
+
+		if (a != nullptr && b != nullptr) {
+			auto* ca = (IConnectionPoint*)a;
+			auto* cb = (IConnectionPoint*)b;
+
+			if (on) {
+				ca->__vftable->connect(ca, cb);
+				cb->__vftable->connect(cb, ca);
+			} else {
+				ca->__vftable->disconnect(ca, cb);
+				cb->__vftable->disconnect(cb, ca);
+			}
+			connected_ = on;
+		}
+
+		if (a) ((IConnectionPoint*)a)->__vftable->release((IConnectionPoint*)a);
+		if (b) ((IConnectionPoint*)b)->__vftable->release((IConnectionPoint*)b);
+	}
+
+	void destroy_controller() {
+		if (controller_ == nullptr) return;
+
+		controller_->__vftable->setComponentHandler(controller_, nullptr);
+		if (!shared_controller_) {
+			if (connected_) connect_points(false);
+			controller_->__vftable->terminate(controller_);
+		}
+
+		controller_->__vftable->release(controller_);
+		controller_ = nullptr;
+		shared_controller_ = connected_ = false;
+	}
 
 	// Buffers for every audio bus in @p dir, activating the main one
 	std::vector<Bus> buses(BusDirection dir, uint32 frames) {
@@ -628,6 +483,12 @@ private:
 	std::vector<Bus> ins_, outs_;
 	std::vector<AudioBusBuffers> in_bufs_, out_bufs_;
 	HostEventList event_list_ = {};
+	HostChanges changes_ = {};
+	host::ParamQueue pending_;
+	std::vector<host::ParamQueue::Change> taken_;
+	IEditController* controller_ = nullptr;
+	bool shared_controller_ = false;
+	bool connected_ = false;
 	bool events_in_ = false;
 	bool active_ = false;
 	bool process_failed_ = false;

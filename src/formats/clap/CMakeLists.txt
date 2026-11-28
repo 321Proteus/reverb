@@ -16,4 +16,4 @@ target_sources(reverb PRIVATE
 
 rv_embed_types(clap)
 
-rv_host_sources(host.cpp)
+rv_host_sources(host.cpp host_abi.hpp)

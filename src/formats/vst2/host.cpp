@@ -1,137 +1,22 @@
 /**
  * @file host.cpp
- * @brief VST2 for reverb-minihost. Declares only the part of the ABI it uses
- * to remove dependence on the IDB TIL
+ * @brief VST2 for reverb-minihost: the host callback and the plugin's
+ * lifecycle (the ABI is in host_abi.hpp)
  */
 #include "formats/host.hpp"
+#include "host_abi.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <vector>
 
 namespace rv::vst2 {
 namespace {
 
-typedef int32_t VstInt32;
-typedef intptr_t VstIntPtr;
-
-struct AEffect;
-typedef VstIntPtr (*audioMasterCallback)(AEffect* effect, VstInt32 opcode,
-	VstInt32 index, VstIntPtr value, void* ptr, float opt);
-typedef VstIntPtr (*AEffectDispatcherProc)(AEffect* effect, VstInt32 opcode,
-	VstInt32 index, VstIntPtr value, void* ptr, float opt);
-typedef void (*AEffectProcessProc)(
-	AEffect* effect, float** inputs, float** outputs, VstInt32 frames);
-
-struct AEffect {
-	VstInt32 magic;
-	AEffectDispatcherProc dispatcher;
-	AEffectProcessProc process; ///< Accumulating, deprecated
-	void* setParameter;
-	void* getParameter;
-	VstInt32 numPrograms;
-	VstInt32 numParams;
-	VstInt32 numInputs;
-	VstInt32 numOutputs;
-	VstInt32 flags;
-	VstIntPtr resvd1;
-	VstIntPtr resvd2;
-	VstInt32 initialDelay;
-	VstInt32 realQualities;
-	VstInt32 offQualities;
-	float ioRatio;
-	void* object;
-	void* user;
-	VstInt32 uniqueID;
-	VstInt32 version;
-	AEffectProcessProc processReplacing;
-	void* processDoubleReplacing;
-};
-
-struct VstTimeInfo {
-	double samplePos;
-	double sampleRate;
-	double nanoSeconds;
-	double ppqPos;
-	double tempo;
-	double barStartPos;
-	double cycleStartPos;
-	double cycleEndPos;
-	VstInt32 timeSigNumerator;
-	VstInt32 timeSigDenominator;
-	VstInt32 smpteOffset;
-	VstInt32 smpteFrameRate;
-	VstInt32 samplesToNextClock;
-	VstInt32 flags;
-};
-
-struct VstMidiEvent {
-	VstInt32 type; ///< kVstMidiType
-	VstInt32 byteSize;
-	VstInt32 deltaFrames;
-	VstInt32 flags;
-	VstInt32 noteLength;
-	VstInt32 noteOffset;
-	char midiData[4];
-	char detune;
-	char noteOffVelocity;
-	char reserved1;
-	char reserved2;
-};
-
-constexpr int kMaxEvents = 16;
-
-// VstEvents with room for kMaxEvents (the SDK declares events[2])
-struct VstEventsN {
-	VstInt32 numEvents;
-	VstIntPtr reserved;
-	VstMidiEvent* events[kMaxEvents];
-};
-
-enum : VstInt32 { // AEffectOpcodes
-	effOpen = 0,
-	effClose = 1,
-	effSetSampleRate = 10,
-	effSetBlockSize = 11,
-	effMainsChanged = 12,
-	effProcessEvents = 25,
-	effGetEffectName = 45,
-	effGetVendorString = 47,
-	effCanDo = 51,
-	effStartProcess = 71,
-	effStopProcess = 72,
-};
-
-enum : VstInt32 { // AudioMasterOpcodes
-	audioMasterVersion = 1,
-	audioMasterWantMidi = 6,
-	audioMasterGetTime = 7,
-	audioMasterGetSampleRate = 16,
-	audioMasterGetBlockSize = 17,
-	audioMasterGetCurrentProcessLevel = 23,
-	audioMasterGetVendorString = 32,
-	audioMasterGetProductString = 33,
-	audioMasterGetVendorVersion = 34,
-	audioMasterCanDo = 37,
-};
-
-enum : VstInt32 {
-	effFlagsCanReplacing = 16,
-	effFlagsIsSynth = 256,
-	kVstMidiType = 1,
-	kVstTransportPlaying = 2,
-	kVstPpqPosValid = 512,
-	kVstTempoValid = 1024,
-	kVstBarsValid = 2048,
-	kVstTimeSigValid = 8192,
-	kVstProcessLevelUser = 1,
-	kVstProcessLevelRealtime = 2,
-};
-
-typedef AEffect* (*VstEntry)(audioMasterCallback);
-
-constexpr VstInt32 kEffectMagic = 0x56737450; // 'VstP'
+using namespace abi;
 
 // main is last: plenty of non-VST modules export it too
 const char* const kEntrySymbols[] = { "VSTPluginMain", "main_macho", "main",
@@ -307,6 +192,87 @@ public:
 
 	void stop_processing() override { dispatch(effStopProcess); }
 
+	size_t param_count() const override {
+		return effect_ ? size_t(std::max(effect_->numParams, 0)) : 0;
+	}
+
+	bool param(size_t index, host::Param* out) const override {
+		if (index >= param_count()) return false;
+		const VstInt32 i = VstInt32(index);
+		// The SDK's limit is 8 characters; plugins often write more
+		char name[256] = {}, display[256] = {}, label[256] = {};
+		dispatch(effGetParamName, i, 0, name);
+		dispatch(effGetParamDisplay, i, 0, display);
+		dispatch(effGetParamLabel, i, 0, label);
+
+		out->id = uint32_t(index);
+		out->name = name;
+		out->text = display;
+		if (label[0]) out->text += std::string(" ") + label;
+		out->value = effect_->getParameter(effect_, i);
+		out->stepped = false; // effGetParameterProperties would tell
+
+		return true;
+	}
+
+	// VST2 takes parameters from any thread, at once
+	bool set_param(uint32_t id, double value) override {
+		if (id >= param_count()) return false;
+		effect_->setParameter(effect_, VstInt32(id), float(value));
+		return true;
+	}
+
+	bool save_state(std::vector<uint8_t>* out) override {
+		if (effect_ == nullptr) return false;
+		if (!(effect_->flags & effFlagsProgramChunks)) {
+			// No chunk: the state is the parameters
+			rv_host_log("no chunks (effFlagsProgramChunks unset): saving the "
+						"parameter values instead");
+			out->assign(kParamsMagic, kParamsMagic + 4);
+			for (size_t i = 0; i < param_count(); i++) {
+				const float v = effect_->getParameter(effect_, VstInt32(i));
+				const uint8_t* b = (const uint8_t*)&v;
+				out->insert(out->end(), b, b + sizeof(v));
+			}
+			return true;
+		}
+
+		void* data = nullptr;
+		const VstIntPtr size = dispatch(effGetChunk, 0, 0, &data); // the bank
+		rv_host_log("effGetChunk -> %ld bytes @ %p", (long)size, data);
+		if (size <= 0 || data == nullptr) return false;
+		out->assign((const uint8_t*)data, (const uint8_t*)data + size);
+		return true;
+	}
+
+	bool load_state(const std::vector<uint8_t>& data) override {
+		if (effect_ == nullptr) return false;
+		if (data.size() >= 4 && !std::memcmp(data.data(), kParamsMagic, 4)) {
+			const size_t n =
+				std::min((data.size() - 4) / sizeof(float), param_count());
+			for (size_t i = 0; i < n; i++) {
+				float v;
+				std::memcpy(&v, data.data() + 4 + i * sizeof(v), sizeof(v));
+				effect_->setParameter(effect_, VstInt32(i), v);
+			}
+			rv_host_log("set %zu parameters from the saved values", n);
+			return true;
+		}
+
+		if (!(effect_->flags & effFlagsProgramChunks)) {
+			rv_host_log("the plugin takes no chunks (effFlagsProgramChunks "
+						"unset)");
+			return false;
+		}
+
+		// Kept until the next load: some plugins hold on to the pointer
+		chunk_ = data;
+		const VstIntPtr r =
+			dispatch(effSetChunk, 0, VstIntPtr(chunk_.size()), chunk_.data());
+		rv_host_log("effSetChunk -> %ld", (long)r);
+		return true;
+	}
+
 	void deactivate() override { dispatch(effMainsChanged, 0, 0); }
 
 	void unload() override {
@@ -342,6 +308,10 @@ private:
 	host::Channels in_, out_;
 	VstMidiEvent midi_[kMaxEvents] = {};
 	VstEventsN events_ = {};
+	std::vector<uint8_t> chunk_;
+
+	// The saved parameter values, for a plugin without chunks
+	static constexpr char kParamsMagic[4] = { 'R', 'V', 'P', '2' };
 };
 
 std::unique_ptr<host::PluginHost> create() {

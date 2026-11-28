@@ -12,4 +12,4 @@ target_sources(reverb PRIVATE
 
 rv_embed_types(vst3)
 
-rv_host_sources(host.cpp)
+rv_host_sources(host.cpp host_abi.hpp host_objects.cpp host_objects.hpp)
