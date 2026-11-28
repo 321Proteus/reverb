@@ -26,14 +26,13 @@ jobs:
       - id: v
         run: |
           echo "ida=$(jq -c '.plugin.idaVersions' ida-plugin.json)" >> "$GITHUB_OUTPUT"
-          # macOS runners are expensive: only build them for the latest SDK
+          # Every OS for every IDA version
           matrix="$(jq -c '
-            (.plugin.idaVersions | max_by(split(".") | map(tonumber))) as $latest
-            | [ .plugin.idaVersions[] as $ida
+            [ .plugin.idaVersions[] as $ida
                 | ({runner: "ubuntu-latest",  name: "linux"},
                    {runner: "windows-latest", name: "windows"},
-                   (select($ida == $latest) | {runner: "macos-latest",   name: "macos-arm64"}),
-                   (select($ida == $latest) | {runner: "macos-15-intel", name: "macos-x64"}))
+                   {runner: "macos-latest",   name: "macos-arm64"},
+                   {runner: "macos-15-intel", name: "macos-x64"})
                   as $os
                 | {ida: $ida, os: $os} ]
             | {include: .}' ida-plugin.json)"
