@@ -189,6 +189,8 @@ static qstring settings_args(const host_settings_t& s, Interface format) {
 	if (s.step) a += " --step";
 	if (!s.realtime) a += " --fast";
 	if (!s.process) a += " --no-process";
+	if (!s.state_file.empty())
+		a.cat_sprnt(" --state \"%s\"", s.state_file.c_str());
 	if (!s.extra.empty()) a.cat_sprnt(" %s", s.extra.c_str());
 
 	return a;

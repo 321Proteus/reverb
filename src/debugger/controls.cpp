@@ -112,7 +112,7 @@ bool edit_settings() {
 	sval_t cls = s.class_index, rate = s.sample_rate, block = s.block_size;
 	ushort checks = (s.notes ? 1 : 0) | (s.paused ? 2 : 0) | (s.step ? 16 : 0) |
 					(s.realtime ? 4 : 0) | (s.process ? 8 : 0);
-	qstring extra = s.extra;
+	qstring extra = s.extra, state = s.state_file;
 	qstring rminihost = s.remote_minihost, rplugin = s.remote_plugin;
 	sval_t rport = s.remote_port;
 
@@ -138,6 +138,9 @@ bool edit_settings() {
 		"<#Wait before each lifecycle phase for Next step#Step throug~h~ "
 		"phases:C>>\n"
 		"\n"
+		"<#A state blob, loaded after init and before activation (on the "
+		"target for a remote debugger)#"
+		"State to loa~d~       :q:1024:40::>\n"
 		"<#Passed as typed, before the plugin path#"
 		"~E~xtra arguments     :q:1024:40::>\n"
 		"\n"
@@ -152,7 +155,7 @@ bool edit_settings() {
 	for (;;) {
 
 		if (ask_form(form, &formats, &format_sel, &cls, &rate, &block, &signals,
-				&signal_sel, &checks, &extra, &rminihost, &rplugin,
+				&signal_sel, &checks, &state, &extra, &rminihost, &rplugin,
 				&rport) != 1)
 			return false;
 
@@ -179,6 +182,8 @@ bool edit_settings() {
 	s.step = (checks & 16) != 0;
 	s.extra = extra;
 	s.extra.trim2();
+	s.state_file = state;
+	s.state_file.trim2();
 
 	s.remote_minihost = rminihost;
 	s.remote_minihost.trim2();
@@ -202,8 +207,8 @@ struct settings_ah_t : public action_handler_t {
 	}
 };
 
-command_ah_t g_next("next"), g_play("play"), g_pause("pause"), g_info("info"),
-	g_quit("quit");
+command_ah_t g_params("params"), g_next("next"), g_play("play"),
+	g_pause("pause"), g_info("info"), g_quit("quit");
 blocks_ah_t g_blocks;
 typed_ah_t g_typed;
 settings_ah_t g_settings;
@@ -232,6 +237,8 @@ control_t g_controls[] = {
 		RV_MH_INFO_SVG, true, true, -1 },
 	{ "reverb:mh_quit", "Quit", "Unload the plugin and end the minihost",
 		&g_quit, RV_MH_QUIT_SVG, true, true, -1 },
+	{ "reverb:mh_params", "List parameters", "Print the plugin's parameters",
+		&g_params, nullptr, false, true, -1 },
 	{ "reverb:mh_command", "Send command...", "Send a typed command", &g_typed,
 		nullptr, false, true, -1 },
 	{ "reverb:mh_settings", "Settings...", "What the minihost is started with",

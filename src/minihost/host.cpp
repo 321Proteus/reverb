@@ -56,6 +56,7 @@ static std::mutex g_step_mutex;
 static std::condition_variable g_step_cv;
 static uint64_t g_step_released = 0; ///< Counts step_next() and mode changes
 static const char* g_step_phase = nullptr; ///< Waited before; null if none
+static bool g_step_on_main = false; ///< Whether the main thread waits
 
 void set_step_mode(bool on) {
 	{
@@ -75,6 +76,7 @@ void step(const char* phase) {
 	const uint64_t seen = g_step_released;
 	g_step_phase = phase;
 	const bool main = on_main_thread();
+	g_step_on_main = main;
 
 	while (g_step_released == seen) {
 		if (!main) {
@@ -89,8 +91,9 @@ void step(const char* phase) {
 	g_step_phase = nullptr;
 }
 
-const char* step_waiting() {
+const char* step_waiting(bool* on_main) {
 	std::lock_guard<std::mutex> lock(g_step_mutex);
+	if (on_main) *on_main = g_step_phase != nullptr && g_step_on_main;
 	return g_step_phase;
 }
 

@@ -24,7 +24,8 @@ struct host_settings_t {
 	bool step = false; ///< Wait before each lifecycle phase for Next step
 	bool realtime = true;
 	bool process = true;
-	qstring extra; ///< Appended to the arguments as typed
+	qstring extra;		///< Appended to the arguments as typed
+	qstring state_file; ///< Loaded after init (--state); empty for none
 
 	// With a remote debugger: the target's paths, and the minihost's port
 	qstring remote_minihost; ///< Empty: next to the plugin's bundle

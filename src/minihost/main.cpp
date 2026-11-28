@@ -1,13 +1,17 @@
 #include "engine.hpp"
 #include "formats/host.hpp"
 #include "host.hpp"
+#include "params.hpp"
 #include <atomic>
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <process.h>
@@ -22,6 +26,30 @@ using namespace rv::host;
 static std::atomic<bool> g_quit{ false };
 static std::atomic<bool> g_info{ false };
 static std::atomic<Engine*> g_engine{ nullptr };
+
+// Commands that call into the plugin run on the main thread: queued by the
+// command threads, run by the main loop
+static std::mutex g_tasks_mutex;
+static std::vector<std::function<void(PluginHost&)>> g_tasks;
+
+static void post_task(std::function<void(PluginHost&)> task) {
+	bool on_main = false;
+	const char* phase = step_waiting(&on_main);
+	if (on_main)
+		rv_host_log("queued: runs once the step before %s goes on", phase);
+	std::lock_guard<std::mutex> lock(g_tasks_mutex);
+	g_tasks.push_back(std::move(task));
+}
+
+static void run_tasks(PluginHost& host) {
+	std::vector<std::function<void(PluginHost&)>> tasks;
+	{
+		std::lock_guard<std::mutex> lock(g_tasks_mutex);
+		tasks.swap(g_tasks);
+	}
+	for (auto& t : tasks)
+		t(host);
+}
 
 static void on_signal(int) { g_quit = true; }
 
@@ -47,8 +75,11 @@ static void usage(const char* argv0) {
 		"  --no-process     stop after creating the instance\n"
 		"  --step           wait before each lifecycle phase for 'next': "
 		"load,\n"
-		"                   entry, create, init, activate, start, process,\n"
-		"                   stop, deactivate, unload ('run' stops stepping)\n"
+		"                   entry, create, init, (controller, state,) "
+		"activate,\n"
+		"                   start, process, stop, deactivate, unload\n"
+		"                   ('run' stops stepping)\n"
+		"  --state FILE     load the plugin's state from FILE after init\n"
 		"  --connect A  connect to the REverb plugin at A (127.0.0.1:port):\n"
 		"               the log goes to IDA, and IDA can send commands\n"
 		"  --listen A   for a remote target: wait for the REverb plugin to\n"
@@ -59,7 +90,9 @@ static void usage(const char* argv0) {
 		"  -h, --help\n"
 		"\n"
 		"While running: 'info', 'play', 'pause', 'blocks N', 'quit' (or "
-		"Ctrl-C).\n",
+		"Ctrl-C),\n"
+		"  'params [part of a name]', 'set <index|#id|name> <0..1>',\n"
+		"  'save FILE' and 'load FILE' (the state blob).\n",
 		argv0);
 }
 
@@ -101,6 +134,30 @@ static void handle_command(const std::string& line) {
 		e->pause();
 		rv_host_log("paused");
 
+	} else if (line == "params" || line.rfind("params ", 0) == 0) {
+		const std::string filter = line.size() > 7 ? line.substr(7) : "";
+		post_task([filter](PluginHost& h) { list_params(h, filter); });
+
+	} else if (line.rfind("set ", 0) == 0) {
+		// The value is the last word: a name may hold spaces
+		const size_t sp = line.find_last_of(' ');
+		const std::string which = line.substr(4, sp > 4 ? sp - 4 : 0);
+		char* end = nullptr;
+		const double v = std::strtod(line.c_str() + sp + 1, &end);
+		if (which.empty() || end == line.c_str() + sp + 1 || *end != 0)
+			rv_host_log("usage: set <index|#id|name> <0..1>");
+		else
+			post_task([which, v](PluginHost& h) { set_param(h, which, v); });
+
+	} else if (line.rfind("save ", 0) == 0 || line.rfind("load ", 0) == 0) {
+		const bool save = line[0] == 's';
+		const std::string path = line.substr(5);
+		post_task([save, path](PluginHost& h) {
+			if (save) save_state_file(h, path);
+			else
+				load_state_file(h, path);
+		});
+
 	} else if (e && line.rfind("blocks ", 0) == 0) {
 		const long long n = std::atoll(line.c_str() + 7);
 		e->run_blocks(n);
@@ -108,7 +165,7 @@ static void handle_command(const std::string& line) {
 
 	} else if (!line.empty())
 		rv_host_log("unknown command '%s'; commands: info, next, run, play, "
-					"quit%s",
+					"params, set, save, load, quit%s",
 			line.c_str(), e ? ", pause, blocks N" : "");
 }
 
@@ -122,7 +179,7 @@ int main(int argc, char** argv) {
 	std::string path;
 	std::optional<Interface> format;
 	LoadOptions opts;
-	std::string connect_to, listen_at, token;
+	std::string connect_to, listen_at, token, state_file;
 	EngineOptions eng;
 
 	bool once = false;
@@ -197,6 +254,9 @@ int main(int argc, char** argv) {
 		else if (a == "--step")
 			stepping = true;
 
+		else if (a == "--state" && i + 1 < argc)
+			state_file = argv[++i];
+
 		else if (!a.empty() && a[0] != '-' && path.empty())
 			path = a;
 
@@ -259,6 +319,12 @@ int main(int argc, char** argv) {
 
 	host->describe();
 
+	// Before activation, as a host restoring a project does
+	if (!state_file.empty() && !g_quit) {
+		step("state");
+		load_state_file(*host, state_file);
+	}
+
 	// --exit without --blocks is just load and unload
 	std::unique_ptr<Engine> engine;
 
@@ -280,6 +346,7 @@ int main(int argc, char** argv) {
 		// Until the blocks are run, still servicing the main thread
 		while (engine->busy() && !g_quit) {
 			host->idle();
+			run_tasks(*host);
 			pump_main_thread(10);
 		}
 		engine->describe();
@@ -289,6 +356,7 @@ int main(int argc, char** argv) {
 
 		while (!g_quit) {
 			host->idle();
+			run_tasks(*host);
 			if (g_info.exchange(false)) {
 				host->describe();
 				if (engine) engine->describe();

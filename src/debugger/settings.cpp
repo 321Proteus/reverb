@@ -22,6 +22,7 @@ enum : nodeidx_t { // altvals; supstrs share the indices
 	SET_REMOTE_PLUGIN,	 // supstr
 	SET_REMOTE_PORT,
 	SET_TOKEN, // supstr, made once per database
+	SET_STATE, // supstr
 };
 
 enum : nodeidx_t {
@@ -53,6 +54,7 @@ host_settings_t load_settings() {
 	n.supstr(&s.extra, SET_EXTRA);
 	n.supstr(&s.remote_minihost, SET_REMOTE_MINIHOST);
 	n.supstr(&s.remote_plugin, SET_REMOTE_PLUGIN);
+	n.supstr(&s.state_file, SET_STATE);
 	if (const nodeidx_t port = n.altval(SET_REMOTE_PORT)) // 0 before it existed
 		s.remote_port = int(port);
 	return s;
@@ -72,6 +74,7 @@ void save_settings(const host_settings_t& s) {
 	n.supset(SET_EXTRA, s.extra.c_str());
 	n.supset(SET_REMOTE_MINIHOST, s.remote_minihost.c_str());
 	n.supset(SET_REMOTE_PLUGIN, s.remote_plugin.c_str());
+	n.supset(SET_STATE, s.state_file.c_str());
 	n.altset(SET_REMOTE_PORT, nodeidx_t(s.remote_port));
 	n.altset(SET_SAVED, 1);
 }

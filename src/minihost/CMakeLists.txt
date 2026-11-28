@@ -4,6 +4,8 @@ add_executable(reverb-minihost
     engine.hpp
     host.cpp
     host.hpp
+    params.cpp
+    params.hpp
     platform.cpp
     platform.hpp
 )
